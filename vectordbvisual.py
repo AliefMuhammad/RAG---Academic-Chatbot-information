@@ -3,7 +3,7 @@ import pandas as pd
 import umap.umap_ as umap
 import plotly.express as px
 import os
-import json # <--- TAMBAHKAN INI
+import json
 from dotenv import load_dotenv
 from supabase.client import Client, create_client
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
@@ -11,7 +11,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 # --- Konfigurasi Awal ---
 load_dotenv()
 
-# Konfigurasi Supabase dan Google API
+#Supabase dan Google API
 supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_ANON_KEY")
 google_api_key = os.getenv("GOOGLE_API_KEY")
@@ -40,10 +40,10 @@ def get_vectors_and_metadata(_supabase_client):
         for item in response.data:
             if item.get('embedding') and item.get('metadata') and item.get('content'):
                 
-                # FIX KONVERSI: Mengurai string vektor menjadi list float yang valid
+                # Mengurai string vektor menjadi list float yang valid
                 try:
                     # Supabase client mengembalikan vektor sebagai string (e.g., "[0.1, 0.2, ...]")
-                    # Kita harus mengubahnya menjadi list float yang dikenali oleh Pandas/UMAP
+                    # Ubah menjadi list float yang dikenali oleh Pandas/UMAP
                     vector_list = json.loads(item['embedding'])
                 except (json.JSONDecodeError, TypeError) as e:
                     st.warning(f"Melewatkan data karena gagal mengurai vektor: {e}")
@@ -52,7 +52,7 @@ def get_vectors_and_metadata(_supabase_client):
                 text_preview = item['content'][:100].replace('\n', ' ') + "..."
                 
                 data.append({
-                    'vector': vector_list, # <--- SEKARANG ADALAH LIST OF FLOAT
+                    'vector': vector_list, 
                     'text': text_preview, 
                     'source': item['metadata'].get('source', 'Unknown File'),
                 })
@@ -62,7 +62,7 @@ def get_vectors_and_metadata(_supabase_client):
         st.error(f"Gagal mengambil vektor dari Supabase: {e}")
         return pd.DataFrame()
 
-# Pengurangan dimensi dan Plotting di-cache karena merupakan operasi yang intensif
+# Pengurangan dimensi dan Plotting di-cache
 @st.cache_data(show_spinner="Memproyeksikan dimensi (UMAP) dan membuat plot...")
 def reduce_and_plot_vectors_3d(df):
     """Mengurangi dimensi (UMAP) dan membuat plot 3D interaktif."""
