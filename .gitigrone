@@ -1,0 +1,7 @@
+# Ignore environment files
+.env
+
+# (Opsional) ignore venv atau file lokal
+venv/
+__pycache__/
+*.ipynb_checkpoints
