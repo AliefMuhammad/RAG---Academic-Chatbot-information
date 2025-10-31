@@ -15,24 +15,24 @@ from langchain_core.messages import AIMessage, HumanMessage
 # --- Konfigurasi Awal ---
 load_dotenv()
 
-# Konfigurasi Google API (Digunakan untuk Embeddings dan LLM)
+# Konfigurasi Google API 
 google_api_key = os.getenv("GOOGLE_API_KEY")
 if not google_api_key:
     st.error("GOOGLE_API_KEY tidak ditemukan")
     st.stop()
 genai.configure(api_key=google_api_key)
 
-# Konfigurasi Supabase (Tidak berubah)
+# Konfigurasi Supabase
 supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_ANON_KEY")
 if not supabase_url or not supabase_key:
     st.error("SUPABASE_URL atau SUPABASE_ANON_KEY tidak ditemukan")
     st.stop()
 
-# Inisialisasi Supabase Client
+# Supabase Client
 supabase: Client = create_client(supabase_url, supabase_key)
 
-# --- Fungsi-Fungsi Inti (Tidak Berubah) ---
+# --- Fungsi-Fungsi Penting ---
 
 def get_pdf_text(pdf_docs):
     """Mengekstrak teks dari daftar file PDF yang diunggah."""
@@ -74,7 +74,7 @@ def store_in_supabase(documents):
     except Exception as e:
         st.error(f"Gagal menyimpan ke Supabase: {e}")
 
-# --- PERUBAHAN UTAMA: Menggunakan Google Gemini Langsung untuk LLM ---
+# LLM GEMINI
 @st.cache_resource
 def get_conversation_chain(_vectorstore):
     """
@@ -112,7 +112,7 @@ def delete_document_from_supabase(filename):
     except Exception as e:
         return False, f"Gagal menghapus dokumen dari Supabase: {e}"
 
-# --- Tampilan Streamlit (UI) ---
+# --- Tampilan Streamlit ---
 
 def main():
     st.set_page_config(page_title="Chatbot Akademik FEB", layout="wide")
@@ -128,7 +128,7 @@ def main():
     if 'conversation_chain' not in st.session_state:
         st.session_state.conversation_chain = None
 
-    # Membuat vector store sekali saja
+    # Membuat vector store
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
     vector_store = SupabaseVectorStore(
         client=supabase,
@@ -138,7 +138,7 @@ def main():
     )
     st.session_state.conversation_chain = get_conversation_chain(vector_store)
 
-    # Dialog Konfirmasi Hapus
+    # Pop up Konfirmasi Hapus
     if st.session_state.file_to_delete:
         with st.container():
             file_name = st.session_state.file_to_delete
@@ -154,7 +154,7 @@ def main():
                 st.session_state.file_to_delete = None
                 st.rerun()
 
-    # Tampilan Antarmuka Chat
+    # Tampilan ui Chat
     for message in st.session_state.chat_history:
         if isinstance(message, HumanMessage):
             with st.chat_message("user", avatar="🧑‍💻"):
@@ -163,7 +163,7 @@ def main():
             with st.chat_message("assistant", avatar="🤖"):
                 st.markdown(message.content)
 
-    # Input dari pengguna
+    # Input
     user_question = st.chat_input("Ajukan pertanyaan disini...")
 
     if user_question:
