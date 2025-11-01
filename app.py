@@ -137,7 +137,7 @@ def main():
         query_name="match_documents"
     )
     st.session_state.conversation_chain = get_conversation_chain(vector_store)
-
+  
     # Pop up Konfirmasi Hapus
     if st.session_state.file_to_delete:
         with st.container():
