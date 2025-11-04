@@ -13,6 +13,7 @@ import bcrypt
 from chatbot_page import get_conversation_chain 
 
 # --- Fungsi Helper (Khusus Admin) ---
+# (Tidak ada perubahan di sini, semua fungsi helper sama)
 
 def hash_password(password):
     """Meng-hash password untuk disimpan"""
@@ -110,14 +111,17 @@ def init_admin_chat_session():
 # --- Tampilan Utama Halaman Admin ---
 
 def show_admin_page():
-    """Menampilkan halaman admin dengan chat dan sidebar manajemen."""
-    st.set_page_config(page_title="Admin - Chatbot", layout="wide")
+    """Menampilkan halaman admin dengan panel manajemen di area utama."""
+    
+    # --- PENTING: Menghapus panggilan st.set_page_config() yang salah ---
+    # st.set_page_config(page_title="Admin - Chatbot", layout="wide") 
+    # Baris di atas HARUS dihapus atau dikomentari agar tidak blank.
     
     # Panggil inisialisasi
     init_admin_chat_session()
     supabase = st.session_state['supabase'] # Ambil client supabase
 
-    # --- Tombol Logout (di atas, di luar sidebar) ---
+    # --- Tombol Logout (di atas) ---
     with st.container():
         col1, col2 = st.columns([10, 1])
         with col1:
@@ -131,10 +135,11 @@ def show_admin_page():
                 st.session_state.file_to_delete = None
                 st.rerun()
 
-    st.markdown("<h1 style='text-align: center;'>DIGICHATBOT (ADMIN VIEW)</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>DIGICHATBOT (ADMIN PANEL)</h1>", unsafe_allow_html=True)
     st.write("---")
 
     # --- Pop up Konfirmasi Hapus ---
+    # (Ini tetap di sini, sebagai modal)
     if st.session_state.file_to_delete:
         with st.container():
             file_name = st.session_state.file_to_delete
@@ -150,83 +155,24 @@ def show_admin_page():
                 st.session_state.file_to_delete = None
                 st.rerun()
 
-    # --- Tampilan ui Chat (Main Area) ---
-    for message in st.session_state.chat_history:
-        if isinstance(message, HumanMessage):
-            with st.chat_message("user", avatar="🧑‍💻"):
-                st.markdown(message.content)
-        elif isinstance(message, AIMessage):
-            with st.chat_message("assistant", avatar="🤖"):
-                st.markdown(message.content)
+    # --- PERUBAHAN DI SINI: Panel Manajemen 2 Kolom ---
+    
+    col_kiri, col_kanan = st.columns(2)
 
-    # Input
-    user_question = st.chat_input("Ajukan pertanyaan disini...")
-    if user_question:
-        with st.spinner("Memproses..."):
-            response = st.session_state.conversation_chain({'question': user_question})
-            st.session_state.chat_history = response['chat_history']
-            st.rerun()
-
-    # --- Sidebar (Panel Admin) ---
-    with st.sidebar:
-        st.title("Admin Panel")
-        st.markdown("---")
-
-        # --- 1. Manajemen Pengguna ---
-        with st.expander("👤 Manajemen Pengguna", expanded=False):
-            st.subheader("Tambah Pengguna Baru")
-            with st.form("admin_add_user"):
-                new_username = st.text_input("Username Baru")
-                new_password = st.text_input("Password Baru", type="password")
-                submit_admin = st.form_submit_button("Tambah Pengguna")
-
-                if submit_admin:
-                    if new_username and new_password:
-                        try:
-                            # Cek dulu apakah username sudah ada
-                            data, count = supabase.table('users').select('username').eq('username', new_username).execute()
-                            if data and len(data[1]) > 0:
-                                st.warning(f"Username '{new_username}' sudah ada.")
-                            else:
-                                # Jika belum ada, hash passwordnya dan masukkan
-                                hashed_pass = hash_password(new_password)
-                                data, count = supabase.table('users').insert({
-                                    "username": new_username,
-                                    "hashed_password": hashed_pass
-                                }).execute()
-                                st.success(f"Pengguna '{new_username}' berhasil ditambahkan!")
-                        except Exception as e:
-                            st.error(f"Gagal menambahkan pengguna: {e}")
-                    else:
-                        st.warning("Username dan password tidak boleh kosong.")
-
-        st.markdown("---")
-
-        # --- 2. Manajemen Dokumen ---
-        st.subheader("Database Dokumen")
-        uploaded_files = get_uploaded_filenames()
-        if uploaded_files:
-            for filename in uploaded_files:
-                col1, col2 = st.columns([4, 1])
-                with col1:
-                    st.info(f"📄 {filename}")
-                with col2:
-                    if st.button("🗑️", key=f"delete_{filename}", help=f"Hapus {filename}"):
-                        st.session_state.file_to_delete = filename
-                        st.rerun()
-        else:
-            st.info("Belum ada dokumen di database.")
+    # --- Kolom Kiri: Manajemen Dokumen ---
+    with col_kiri:
+        st.subheader("📄 Manajemen Dokumen")
         
         st.markdown("---")
-        
         st.subheader("Unggah Dokumen Baru")
         pdf_docs = st.file_uploader(
             "Pilih file PDF", 
             accept_multiple_files=True,
-            type="pdf"
+            type="pdf",
+            label_visibility="collapsed"
         )
         
-        if st.button("Proses Dokumen"):
+        if st.button("Proses Dokumen", use_container_width=True, type="primary"):
             if pdf_docs:
                 with st.spinner("Memproses file..."):
                     existing_files = get_uploaded_filenames()
@@ -243,3 +189,90 @@ def show_admin_page():
                     st.rerun()
             else:
                 st.warning("Silakan unggah setidaknya satu file PDF.")
+        
+        st.markdown("---")
+        
+        st.subheader("Database Dokumen Saat Ini")
+        uploaded_files = get_uploaded_filenames()
+        if uploaded_files:
+            # Gunakan st.container() untuk membuat area scroll jika daftar terlalu panjang
+            with st.container(height=400): 
+                for filename in uploaded_files:
+                    col1, col2 = st.columns([4, 1])
+                    with col1:
+                        st.info(f"📄 {filename}")
+                    with col2:
+                        if st.button("🗑️", key=f"delete_{filename}", help=f"Hapus {filename}", use_container_width=True):
+                            st.session_state.file_to_delete = filename
+                            st.rerun()
+        else:
+            st.info("Belum ada dokumen di database.")
+
+    # --- Kolom Kanan: Manajemen Pengguna ---
+    with col_kanan:
+        st.subheader("👤 Manajemen Pengguna")
+        st.markdown("---")
+        
+        st.subheader("Tambah Pengguna Baru")
+        with st.form("admin_add_user"):
+            new_username = st.text_input("Username Baru")
+            new_password = st.text_input("Password Baru", type="password")
+            submit_admin = st.form_submit_button("Tambah Pengguna", use_container_width=True, type="primary")
+
+            if submit_admin:
+                if new_username and new_password:
+                    try:
+                        # Cek dulu apakah username sudah ada
+                        data, count = supabase.table('users').select('username').eq('username', new_username).execute()
+                        if data and len(data[1]) > 0:
+                            st.warning(f"Username '{new_username}' sudah ada.")
+                        else:
+                            # Jika belum ada, hash passwordnya dan masukkan
+                            hashed_pass = hash_password(new_password)
+                            data, count = supabase.table('users').insert({
+                                "username": new_username,
+                                "hashed_password": hashed_pass
+                            }).execute()
+                            st.success(f"Pengguna '{new_username}' berhasil ditambahkan!")
+                    except Exception as e:
+                        st.error(f"Gagal menambahkan pengguna: {e}")
+                else:
+                    st.warning("Username dan password tidak boleh kosong.")
+        
+        st.markdown("---")
+        st.subheader("Daftar Pengguna Saat Ini")
+        # Menampilkan daftar pengguna (opsional, tapi bagus untuk admin)
+        try:
+            users_data, _ = supabase.table('users').select('username', 'created_at').execute()
+            if users_data and users_data[1]:
+                with st.container(height=400):
+                    for user in users_data[1]:
+                        st.info(f"👤 {user['username']}")
+            else:
+                st.info("Hanya 'admin' yang ada.")
+        except Exception as e:
+            st.error(f"Gagal mengambil daftar pengguna: {e}")
+
+
+    # --- PERUBAHAN DI SINI: Chat dipindah ke Expander ---
+    st.write("---")
+    with st.expander("🤖 Test Chatbot (Admin)", expanded=False):
+        # Tampilan ui Chat (Main Area)
+        # Buat container dengan tinggi tetap agar tidak memakan banyak ruang
+        chat_container = st.container(height=500)
+        with chat_container:
+            for message in st.session_state.chat_history:
+                if isinstance(message, HumanMessage):
+                    with st.chat_message("user", avatar="🧑‍💻"):
+                        st.markdown(message.content)
+                elif isinstance(message, AIMessage):
+                    with st.chat_message("assistant", avatar="🤖"):
+                        st.markdown(message.content)
+
+        # Input
+        user_question = st.chat_input("Ajukan pertanyaan disini...")
+        if user_question:
+            with st.spinner("Memproses..."):
+                response = st.session_state.conversation_chain({'question': user_question})
+                st.session_state.chat_history = response['chat_history']
+                st.rerun()
