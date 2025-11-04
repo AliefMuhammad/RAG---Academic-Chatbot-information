@@ -37,7 +37,7 @@ def get_pdf_text(pdf_docs):
 
 def get_text_chunks(text, file_name, classification):
     """Memecah teks mentah menjadi potongan-potongan (chunks) dengan metadata."""
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=100)
     chunks = text_splitter.split_text(text)
     documents = [
         Document(
@@ -51,6 +51,7 @@ def get_text_chunks(text, file_name, classification):
     ]
     return documents
 
+# --- FUNGSI DIPERBAIKI ---
 def store_in_supabase(documents, pdf_file_object):
     """
     Membuat embedding, menyimpan chunks ke DB, DAN mengunggah file asli ke Storage.
@@ -62,7 +63,7 @@ def store_in_supabase(documents, pdf_file_object):
     
     supabase = st.session_state['supabase']
     google_api_key = st.session_state['google_api_key']
-    file_name = documents[0].metadata['source'] # Ini sekarang nama yang sudah bersih
+    file_name = documents[0].metadata['source'] # Ini adalah nama yang sudah bersih
 
     try:
         # 1. Unggah file PDF asli ke Supabase Storage
@@ -70,17 +71,18 @@ def store_in_supabase(documents, pdf_file_object):
         file_content = pdf_file_object.read()
         
         try:
-            # Gunakan .from_() sesuai v2 supabase-py
+            # PERBAIKAN: Menggunakan .from_() untuk supabase-py v2
             supabase.storage.from_('pdf_documents').upload(
                 path=file_name,
                 file=file_content,
-                file_options={"content-type": "application/pdf"}
+                file_options={"content-type": "application/pdf", "upsert": "true"} # Upsert true agar bisa menimpa
             )
         except Exception as storage_error:
+            # Tangani error duplikat jika upsert tidak diatur
             if "Duplicate" in str(storage_error) or "409" in str(storage_error):
                 st.warning(f"File '{file_name}' sudah ada di Storage. Melanjutkan proses RAG.")
             else:
-                raise storage_error 
+                raise storage_error # Lemparkan error jika ini masalah lain (misal: RLS)
 
         # 2. Simpan text chunks dan embeddings ke Database
         genai.configure(api_key=google_api_key)
@@ -107,20 +109,28 @@ def get_document_list(supabase):
     try:
         response = supabase.table('documents').select('metadata').execute()
         if response.data:
-            unique_docs = {item['metadata']['source']: item['metadata'] for item in response.data}.values()
-            return list(unique_docs)
+            # Mengambil metadata unik berdasarkan 'source'
+            unique_docs = {}
+            for item in response.data:
+                # Tambahkan pengecekan metadata tidak None
+                if item.get('metadata') and item['metadata'].get('source'):
+                    unique_docs[item['metadata']['source']] = item['metadata']
+            return list(unique_docs.values())
         return []
     except Exception as e:
         st.error(f"Gagal mengambil daftar file dari Supabase: {e}")
         return []
 
+# --- FUNGSI DIPERBAIKI ---
 def delete_document_from_supabase(filename):
     """Menghapus entri dari DB DAN file dari Storage."""
     supabase = st.session_state['supabase']
     try:
+        # 1. Hapus dari Database (tabel documents)
         supabase.table('documents').delete().eq('metadata->>source', filename).execute()
         
-        # Gunakan .from_()
+        # 2. Hapus dari Storage (bucket pdf_documents)
+        # PERBAIKAN: Menggunakan .from_() untuk supabase-py v2
         supabase.storage.from_('pdf_documents').remove([filename])
         
         return True, f"Dokumen '{filename}' berhasil dihapus dari DB dan Storage."
@@ -130,7 +140,6 @@ def delete_document_from_supabase(filename):
         return False, f"Gagal menghapus dokumen: {e}"
 
 # --- FUNGSI Helper Dashboard ---
-# (Tidak ada perubahan di sini)
 @st.cache_data(ttl=600) 
 def get_dashboard_data(_supabase):
     try:
@@ -161,9 +170,13 @@ def create_doc_chart(docs_data):
         return st.info("Belum ada data dokumen.")
     unique_docs = {}
     for item in docs_data:
-        source = item['metadata'].get('source', 'N/A')
-        classification = item['metadata'].get('classification', 'Lain-lain')
-        unique_docs[source] = classification
+        # Pengecekan keamanan
+        if item.get('metadata'):
+            source = item['metadata'].get('source', 'N/A')
+            classification = item['metadata'].get('classification', 'Lain-lain')
+            if source != 'N/A':
+                unique_docs[source] = classification
+        
     df_source = pd.DataFrame(list(unique_docs.values()), columns=['classification'])
     df_counts = df_source['classification'].value_counts().reset_index()
     df_counts.columns = ['classification', 'count']
@@ -201,7 +214,6 @@ def init_admin_chat_session():
         st.session_state.file_to_delete = None
 
 # --- Tampilan Utama Halaman Admin ---
-# (Tidak ada perubahan di sini)
 def show_admin_page():
     """Menampilkan halaman admin dengan panel manajemen di area utama."""
     
@@ -236,7 +248,7 @@ def show_admin_page():
     col_dash_1, col_dash_2 = st.columns([1, 2])
     with col_dash_1:
         st.metric("Total Pengguna", len(users_data))
-        st.metric("Total Dokumen", len(set(item['metadata'].get('source') for item in docs_data)))
+        st.metric("Total Dokumen", len(set(item['metadata'].get('source') for item in docs_data if item.get('metadata'))))
     with col_dash_2:
         create_doc_chart(docs_data)
     st.markdown("---")
@@ -256,6 +268,7 @@ def show_admin_page():
         type="pdf"
     )
     
+    # --- LOGIKA TOMBOL DIPERBAIKI ---
     if st.button("Proses Dokumen", use_container_width=True, type="primary"):
         if not pdf_docs:
             st.warning("Silakan unggah setidaknya satu file PDF.")
@@ -263,22 +276,20 @@ def show_admin_page():
             st.warning("Silakan pilih klasifikasi dokumen.")
         else:
             with st.spinner("Memproses file..."):
-                all_docs_list = [item['metadata'].get('source') for item in get_document_list(supabase)]
+                all_docs_list = [item.get('source') for item in get_document_list(supabase) if item.get('source')]
                 all_successful = True 
                 
                 for pdf in pdf_docs:
-                    # --- PERBAIKAN DI SINI ---
-                    # 1. Bersihkan nama file
+                    # Membersihkan nama file (mengganti spasi dengan _)
                     sanitized_name = pdf.name.replace(" ", "_")
                     
-                    # 2. Cek nama yang sudah bersih
                     if sanitized_name in all_docs_list:
                         st.warning(f"File '{sanitized_name}' sudah ada. Proses dilewati.")
                         continue
                     
                     raw_text = get_pdf_text([pdf])
                     if raw_text:
-                        # 3. Kirim nama yang sudah bersih
+                        # Mengirim nama yang sudah bersih
                         text_chunks = get_text_chunks(raw_text, sanitized_name, classification)
                         success = store_in_supabase(text_chunks, pdf) 
                         if not success:
@@ -288,7 +299,7 @@ def show_admin_page():
                         all_successful = False
                 
                 if all_successful:
-                    st.rerun()
+                    st.rerun() # Refresh halaman HANYA jika semua sukses
                 else:
                     st.error("Satu atau lebih file gagal diproses. Pesan error ada di atas. Halaman tidak di-refresh.")
     
@@ -385,6 +396,8 @@ def show_admin_page():
             with st.chat_message("user"):
                 st.markdown(user_question)
             with st.spinner("DIGICHATBOT sedang memproses..."):
+                # Gunakan logika chain dari session state
                 response = st.session_state.conversation_chain({'question': user_question})
+                # Simpan history lengkap (termasuk jawaban)
                 st.session_state.chat_history = response['chat_history']
                 st.rerun()

@@ -6,7 +6,6 @@ from langchain_community.vectorstores import SupabaseVectorStore
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
 from langchain_core.messages import AIMessage, HumanMessage
-from langchain.prompts import PromptTemplate
 
 # --- Fungsi Helper (Khusus Chatbot) ---
 
@@ -23,36 +22,18 @@ def get_conversation_chain(_vectorstore, google_api_key):
         google_api_key=google_api_key
     )
     
+    # PERBAIKAN: Menambahkan output_key='answer'
     memory = ConversationBufferMemory(
         memory_key='chat_history', 
         return_messages=True, 
-        output_key='answer' # Penting untuk menyimpan 'answer'
-    )
-
-    PROMPT_TEMPLATE = """
-    Anda adalah asisten AI yang sopan. Jawab pertanyaan pengguna HANYA berdasarkan konteks yang diberikan di bawah ini.
-    Jika informasi tidak ada di dalam konteks, katakan "Maaf, saya tidak dapat menemukan informasi tersebut di dokumen."
-    JANGAN berhalusinasi atau mengarang jawaban.
-
-    Konteks:
-    {context}
-
-    Pertanyaan:
-    {question}
-
-    Jawaban:
-    """
-    
-    # Buat prompt dari template
-    CUSTOM_PROMPT = PromptTemplate(
-        template=PROMPT_TEMPLATE, input_variables=["context", "question"]
+        output_key='answer' 
     )
     
     conversation_chain = ConversationalRetrievalChain.from_llm(
         llm=llm,
         retriever=_vectorstore.as_retriever(), 
         memory=memory,
-        return_source_documents=True # SANGAT PENTING: Meminta RAG mengembalikan sumber
+        return_source_documents=True # PERBAIKAN: Meminta sumber dokumen
     )
     return conversation_chain
 
@@ -106,9 +87,7 @@ def show_chatbot_page():
     st.markdown("<div style='text-align: center;'>Tanyakan informasi akademik di sini</div>", unsafe_allow_html=True)
     st.write("---")
 
-    # --- PERBAIKAN DI SINI ---
-    # Loop ini sekarang bertanggung jawab untuk menampilkan 
-    # history DAN sumber-sumber yang tersimpan di metadata
+    # --- PERBAIKAN: Tampilkan History DAN Sumber ---
     for message in st.session_state.chat_history:
         if isinstance(message, HumanMessage):
             with st.chat_message("user"): 
@@ -117,13 +96,12 @@ def show_chatbot_page():
             with st.chat_message("assistant"): 
                 st.markdown(message.content)
                 # Cek jika ada metadata sumber di pesan AI
-                # 'metadata' adalah fitur bawaan dari AIMessage
                 if "sources" in message.metadata and message.metadata["sources"]:
                     with st.expander("Lihat Sumber Dokumen"):
                         for source_file, public_url in message.metadata["sources"].items():
                             st.markdown(f"📄 [{source_file}]({public_url})")
 
-    # --- PERBAIKAN TOTAL DI SINI (LOGIKA INPUT) ---
+    # --- PERBAIKAN: Logika Input Baru ---
     user_question = st.chat_input("Ajukan pertanyaan disini...")
 
     if user_question:
@@ -146,12 +124,13 @@ def show_chatbot_page():
                 # 5. Ekstrak dan proses sumber
                 ai_sources = {}
                 if 'source_documents' in response:
+                    # Buat set unik dari nama file sumber
                     sources = {doc.metadata['source'] for doc in response['source_documents']}
                     if sources:
                         for source_file in sources:
                             try:
                                 supabase = st.session_state['supabase']
-                                # Pastikan menggunakan .from_() untuk v2
+                                # PERBAIKAN: Menggunakan .from_() untuk supabase-py v2
                                 public_url = supabase.storage.from_('pdf_documents').get_public_url(source_file)
                                 ai_sources[source_file] = public_url
                             except Exception as e:
@@ -166,6 +145,4 @@ def show_chatbot_page():
                 )
                 
                 # 7. Rerun halaman.
-                # Loop 'for message...' di atas sekarang akan berjalan
-                # dan menampilkan pesan user DAN pesan AI + sumbernya.
                 st.rerun()
