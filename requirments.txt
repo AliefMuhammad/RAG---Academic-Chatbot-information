@@ -19,3 +19,4 @@ seaborn
 umap-learn
 plotly
 bcrypt
+altair
