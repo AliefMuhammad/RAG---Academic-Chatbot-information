@@ -25,7 +25,7 @@ def get_pdf_text(pdf_docs):
     text = ""
     for pdf in pdf_docs:
         try:
-            pdf.seek(0) # PENTING: Setel ulang pointer file
+            pdf.seek(0)
             pdf_reader = PdfReader(pdf)
             for page in pdf_reader.pages:
                 page_text = page.extract_text()
@@ -71,18 +71,16 @@ def store_in_supabase(documents, pdf_file_object):
         file_content = pdf_file_object.read()
         
         try:
-            # PERBAIKAN: Menggunakan .from_() untuk supabase-py v2
             supabase.storage.from_('pdf_documents').upload(
                 path=file_name,
                 file=file_content,
-                file_options={"content-type": "application/pdf", "upsert": "true"} # Upsert true agar bisa menimpa
+                file_options={"content-type": "application/pdf", "upsert": "true"} 
             )
         except Exception as storage_error:
-            # Tangani error duplikat jika upsert tidak diatur
             if "Duplicate" in str(storage_error) or "409" in str(storage_error):
                 st.warning(f"File '{file_name}' sudah ada di Storage. Melanjutkan proses RAG.")
             else:
-                raise storage_error # Lemparkan error jika ini masalah lain (misal: RLS)
+                raise storage_error
 
         # 2. Simpan text chunks dan embeddings ke Database
         genai.configure(api_key=google_api_key)
@@ -96,7 +94,7 @@ def store_in_supabase(documents, pdf_file_object):
             chunk_size=500,
         )
         st.success(f"File '{file_name}' berhasil diproses (RAG dan Storage)!")
-        return True # Sukses
+        return True
     
     except Exception as e:
         st.error(f"GAGAL memproses '{file_name}': {e}")
@@ -109,10 +107,8 @@ def get_document_list(supabase):
     try:
         response = supabase.table('documents').select('metadata').execute()
         if response.data:
-            # Mengambil metadata unik berdasarkan 'source'
             unique_docs = {}
             for item in response.data:
-                # Tambahkan pengecekan metadata tidak None
                 if item.get('metadata') and item['metadata'].get('source'):
                     unique_docs[item['metadata']['source']] = item['metadata']
             return list(unique_docs.values())
@@ -130,7 +126,6 @@ def delete_document_from_supabase(filename):
         supabase.table('documents').delete().eq('metadata->>source', filename).execute()
         
         # 2. Hapus dari Storage (bucket pdf_documents)
-        # PERBAIKAN: Menggunakan .from_() untuk supabase-py v2
         supabase.storage.from_('pdf_documents').remove([filename])
         
         return True, f"Dokumen '{filename}' berhasil dihapus dari DB dan Storage."
@@ -170,7 +165,6 @@ def create_doc_chart(docs_data):
         return st.info("Belum ada data dokumen.")
     unique_docs = {}
     for item in docs_data:
-        # Pengecekan keamanan
         if item.get('metadata'):
             source = item['metadata'].get('source', 'N/A')
             classification = item['metadata'].get('classification', 'Lain-lain')
@@ -268,7 +262,7 @@ def show_admin_page():
         type="pdf"
     )
     
-    # --- LOGIKA TOMBOL DIPERBAIKI ---
+    # --- LOGIKA TOMBOL ---
     if st.button("Proses Dokumen", use_container_width=True, type="primary"):
         if not pdf_docs:
             st.warning("Silakan unggah setidaknya satu file PDF.")
@@ -280,7 +274,6 @@ def show_admin_page():
                 all_successful = True 
                 
                 for pdf in pdf_docs:
-                    # Membersihkan nama file (mengganti spasi dengan _)
                     sanitized_name = pdf.name.replace(" ", "_")
                     
                     if sanitized_name in all_docs_list:
@@ -289,7 +282,6 @@ def show_admin_page():
                     
                     raw_text = get_pdf_text([pdf])
                     if raw_text:
-                        # Mengirim nama yang sudah bersih
                         text_chunks = get_text_chunks(raw_text, sanitized_name, classification)
                         success = store_in_supabase(text_chunks, pdf) 
                         if not success:
@@ -299,7 +291,7 @@ def show_admin_page():
                         all_successful = False
                 
                 if all_successful:
-                    st.rerun() # Refresh halaman HANYA jika semua sukses
+                    st.rerun()
                 else:
                     st.error("Satu atau lebih file gagal diproses. Pesan error ada di atas. Halaman tidak di-refresh.")
     

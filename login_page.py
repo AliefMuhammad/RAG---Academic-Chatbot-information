@@ -1,8 +1,8 @@
 # login_page.py
 import streamlit as st
 import bcrypt
-import base64  # Import modul base64
-import os      # Import os untuk memastikan path file benar
+import base64 
+import os     
 
 def check_password(password, hashed_password):
     """Mengecek apakah password input cocok dengan hash di DB"""
@@ -26,18 +26,14 @@ def show_login_page():
     st.set_page_config(page_title="Login")
 
     # --- MEMBUAT STRING BASE64 DARI GAMBAR ---
-    # Pastikan nama file 'login_bg.png' sudah benar dan ada di folder yang sama
     img_base64 = get_base64_of_bin_file("login_bg.png")
     
     if img_base64 is None:
         st.error("Error: File 'login_bg.png' tidak ditemukan. Pastikan file ada di folder yang sama.")
-        # Gunakan background hitam solid jika file tidak ada
-        img_base64_string = "" # Kosongkan
-        gradient = "linear-gradient(rgba(0, 0, 0, 1), rgba(0, 0, 0, 1))" # Hitam pekat
+        img_base64_string = ""
+        gradient = "linear-gradient(rgba(0, 0, 0, 1), rgba(0, 0, 0, 1))"
     else:
-        # Ini adalah format 'data URI' yang disematkan
         img_base64_string = f'data:image/png;base64,{img_base64}'
-        # Pasang gradient (filter gelap) di atas gambar
         gradient = f'linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.7)), url("{img_base64_string}")'
 
     
@@ -81,14 +77,13 @@ def show_login_page():
     st.markdown("<h1 style='text-align: center;'>DIGICHATBOT</h1>", unsafe_allow_html=True)
     st.markdown("<div style='text-align: center;'>Silakan login untuk melanjutkan</div>", unsafe_allow_html=True)
 
-    # Ambil koneksi supabase dari session_state
     if 'supabase' not in st.session_state:
         st.error("Koneksi Supabase tidak ditemukan di session state.")
         st.stop()
         
     supabase = st.session_state['supabase']
     
-    # Kolom dibuat lebih slim [1.5, 1, 1.5]
+
     col1, col2, col3 = st.columns([1.5, 1, 1.5])
     
     with col2:
@@ -119,5 +114,3 @@ def show_login_page():
                                 st.error("Username atau password salah")
                         except Exception as e:
                             st.error(f"Terjadi kesalahan: {e}")
-
-# ... (sisa kode Anda untuk inisialisasi, dll.)

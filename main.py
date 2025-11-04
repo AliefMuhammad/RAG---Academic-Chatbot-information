@@ -49,7 +49,6 @@ def main_router():
     if not st.session_state['logged_in']:
         show_login_page()
     else:
-        # Pisahkan tampilan berdasarkan peran (misal: 'admin' vs 'user')
         if st.session_state['username'] == 'admin':
             show_admin_page()
         else:

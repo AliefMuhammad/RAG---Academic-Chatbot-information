@@ -6,11 +6,10 @@ from langchain_community.vectorstores import SupabaseVectorStore
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
 from langchain_core.messages import AIMessage, HumanMessage
-from langchain.prompts import PromptTemplate # <-- 1. IMPORT PROMPT TEMPLATE
+from langchain.prompts import PromptTemplate
 
 # --- Fungsi Helper (Khusus Chatbot) ---
 
-# --- PERUBAHAN BESAR DI FUNGSI INI ---
 @st.cache_resource
 def get_conversation_chain(_vectorstore, google_api_key):
     """
@@ -20,7 +19,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
     genai.configure(api_key=google_api_key)
     llm = ChatGoogleGenerativeAI(
         model="models/gemini-2.5-pro",
-        temperature=0.1, # Turunkan suhu agar lebih patuh
+        temperature=0.2, 
         convert_system_message_to_human=True,
         google_api_key=google_api_key
     )
@@ -31,8 +30,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
         output_key='answer' 
     )
     
-    # 2. BUAT TEMPLATE PROMPT ANDA
-    # Ini adalah "brief" yang Anda berikan, diubah menjadi instruksi
+    # 2. TEMPLATE PROMPT 
     CUSTOM_PROMPT_TEMPLATE = """
     Anda adalah asisten AI akademik yang sopan dan profesional. Jawab pertanyaan pengguna secara langsung dan to the point dan tetap sopan dan ramah, HANYA berdasarkan konteks yang diberikan di bawah ini.
     JANGAN pernah memulai jawaban Anda dengan frasa seperti "Berdasarkan konteks yang diberikan...".
@@ -58,7 +56,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
         template=CUSTOM_PROMPT_TEMPLATE, input_variables=["context", "question"]
     )
 
-    # 4. SUNTIKKAN PROMPT KE DALAM CHAIN
+    # 4. INPUT PROMPT KE DALAM CHAIN
     conversation_chain = ConversationalRetrievalChain.from_llm(
         llm=llm,
         retriever=_vectorstore.as_retriever(), 
@@ -68,7 +66,6 @@ def get_conversation_chain(_vectorstore, google_api_key):
     )
     return conversation_chain
 
-# --- (Tidak ada perubahan di fungsi ini) ---
 def init_user_chat_session():
     """Inisialisasi session state yang diperlukan untuk halaman chat."""
     if 'chat_history' not in st.session_state:
@@ -94,7 +91,6 @@ def init_user_chat_session():
         )
         st.session_state.conversation_chain = get_conversation_chain(vector_store, google_api_key)
 
-# --- (Tidak ada perubahan di fungsi ini) ---
 def show_chatbot_page():
     """Menampilkan halaman chatbot untuk pengguna biasa."""
     
@@ -118,7 +114,7 @@ def show_chatbot_page():
     st.markdown("<div style='text_align: center;'>Tanyakan informasi akademik di sini</div>", unsafe_allow_html=True)
     st.write("---")
 
-    # Tampilkan History DAN Sumber
+    # Tampilkan Sumber
     for message in st.session_state.chat_history:
         if isinstance(message, HumanMessage):
             with st.chat_message("user"): 
@@ -159,9 +155,9 @@ def show_chatbot_page():
                             except Exception as e:
                                 st.warning(f"Tidak dapat membuat link untuk {source_file}: {e}")
 
-                # Jika jawaban adalah fallback "Bu Intan", jangan tampilkan sumber
+                # Jika jawaban adalah fallback "Bu Intan", jangan tampilkan sumber karna tidak terjawab
                 if "Bu Intan" in ai_answer:
-                    ai_sources = {} # Kosongkan sumber
+                    ai_sources = {} 
 
                 st.session_state.chat_history.append(
                     AIMessage(
