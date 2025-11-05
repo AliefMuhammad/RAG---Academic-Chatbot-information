@@ -1,13 +1,18 @@
-# admin_page.py (Versi Optimal)
+# admin_page.py (Perbaikan Chunking dengan strategy="by_title")
 import streamlit as st
-# [MODIFIKASI] PyPDF2 dihapus, unstructured, hashlib, dan uuid ditambahkan
-# from PyPDF2 import PdfReader # <-- HAPUS
+import tempfile
+import os
+import logging # <-- Import untuk membungkam warning
+
+# --- Import Kunci ---
 from unstructured.partition.pdf import partition_pdf
 from unstructured.cleaners.core import clean_extra_whitespace, clean_non_ascii_chars
 import hashlib
 import uuid
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+# --- Hapus import yang tidak perlu ---
+# from langchain_text_splitters import RecursiveCharacterTextSplitter # <-- HAPUS INI
+
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 import google.generativeai as genai
 from langchain_community.vectorstores import SupabaseVectorStore
@@ -20,86 +25,83 @@ import altair as alt
 # Impor fungsi chat dari chatbot_page
 from chatbot_page import get_conversation_chain
 
+# --- Sembunyikan Warning 'pdfminer' (dari log Anda) ---
+logging.getLogger("pdfminer").setLevel(logging.ERROR)
+
 # --- Fungsi Helper (Auth) ---
 def hash_password(password):
     """Meng-hash password untuk disimpan"""
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
-# --- [FUNGSI BARU & OPTIMAL] Fungsi Akuisisi Data ---
+# --- [FUNGSI DIPERBAIKI] Fungsi Akuisisi Data ---
 
 def process_and_store_document(pdf_file_object, file_content, file_name, classification, file_hash):
     """
     Fungsi master untuk memproses satu PDF:
-    1. Parsing "hi-res" dengan unstructured
+    1. Parsing "hi-res" DENGAN chunking "by_title"
     2. Membuat parent record di DB
     3. Mengunggah file ke Storage
-    4. Membuat chunks/documents dengan metadata kaya
+    4. Membuat chunks/documents DARI ELEMEN YANG SUDAH DI-CHUNK
     5. Menyimpan chunks & embeddings ke vector store
-    Mengembalikan (True, "Pesan Sukses") atau (False, "Pesan Error")
     """
     supabase = st.session_state['supabase']
     google_api_key = st.session_state['google_api_key']
     parent_id = str(uuid.uuid4()) # ID unik untuk file induk ini
 
     try:
-        # --- Langkah 1: Parsing PDF dengan Unstructured ---
-        # "hi_res" adalah strategi terbaik. Ia menggunakan model ML untuk memahami layout,
-        # mengekstrak tabel sebagai HTML, dan bahkan bisa OCR gambar.
+        # --- Langkah 1: Parsing PDF dengan Unstructured (STRATEGI BARU) ---
         st.write(f"Memulai 'unstructured' parsing untuk {file_name}...")
         elements = partition_pdf(
             file=pdf_file_object,
-            strategy="hi_res",  # Gunakan "fast" jika "hi_res" terlalu lambat/berat
-            extract_images_in_pdf=False,
+            strategy="hi_res", 
             infer_table_structure=True,
-            # (Opsional) Jika Anda ingin teks dari gambar:
-            # strategy="hi_res",
-            # ocr_languages="ind+eng", 
+            ocr_languages="ind+eng", # Tetap gunakan ini
+            extract_images_in_pdf=False,
+            
+            # --- PERBAIKAN UTAMA: CHUNKING CERDAS ---
+            chunking_strategy="by_title",
+            max_characters=4000,
+            combine_text_under_n_chars=2000,
+            new_after_n_chars=3800,
+            # --- AKHIR PERBAIKAN ---
         )
-        st.write(f"Parsing selesai. Ditemukan {len(elements)} elemen (paragraf, tabel, judul).")
+        st.write(f"Parsing selesai. Ditemukan {len(elements)} CHUNKS logis.")
 
-        # --- Langkah 2: Buat Chunks/Documents dari Elemen ---
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
+        # --- Langkah 2: Buat Dokumen LangChain dari Elemen/Chunks ---
         documents = []
-
         for el in elements:
-            element_type = el.category # Misal: "Title", "NarrativeText", "Table", "ListItem"
+            element_type = el.category
             page_number = el.metadata.page_number
             
-            # Unstructured kadang mengembalikan tabel sebagai HTML. Ini bagus!
+            # Teks sekarang sudah di-chunk dengan baik (bukan per kata)
             if element_type == "Table":
                 text = el.metadata.text_as_html
             else:
                 text = str(el)
 
-            # Bersihkan teks
             text = clean_non_ascii_chars(text)
             text = clean_extra_whitespace(text)
             
             if not text.strip():
-                continue # Lewati elemen kosong
+                continue 
 
-            # Pecah elemen yang terlalu besar (misal: paragraf panjang)
-            chunks = text_splitter.split_text(text)
-            
-            for chunk in chunks:
-                # [OPTIMAL] Buat metadata yang kaya untuk setiap chunk
-                new_metadata = {
-                    "source": file_name,
-                    "classification": classification,
-                    "file_hash": file_hash,
-                    "parent_file_id": parent_id,
-                    "element_type": element_type,
-                    "page_number": int(page_number) if page_number else 1
-                }
-                documents.append(Document(page_content=chunk, metadata=new_metadata))
+            # Kita tidak perlu text_splitter lagi, 'el' sudah merupakan chunk
+            new_metadata = {
+                "source": file_name,
+                "classification": classification,
+                "file_hash": file_hash,
+                "parent_file_id": parent_id,
+                "element_type": element_type,
+                "page_number": int(page_number) if page_number else 1
+            }
+            documents.append(Document(page_content=text, metadata=new_metadata))
 
         if not documents:
             return False, f"Tidak ada teks yang bisa diekstrak dari {file_name}."
 
-        st.write(f"Membuat {len(documents)} chunks (vektor) dari {file_name}...")
+        st.write(f"Membuat {len(documents)} vektor dari {file_name}...")
 
         # --- Langkah 3: Simpan ke Database (Atomik) ---
-        # Kita lakukan operasi DB dalam satu blok try-except
         
         # 3a. Buat entri di tabel file induk (parent_files)
         supabase.table('parent_files').insert({
@@ -118,7 +120,7 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
             )
         except Exception as storage_error:
             if "Duplicate" not in str(storage_error) and "409" not in str(storage_error):
-                raise storage_error # Lemparkan error jika bukan duplikat
+                raise storage_error 
 
         # 3c. Simpan text chunks dan embeddings ke Database (tabel documents)
         genai.configure(api_key=google_api_key)
@@ -130,14 +132,13 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
             client=supabase,
             table_name="documents",
             query_name="match_documents",
-            chunk_size=500, # Sesuaikan jika perlu
+            chunk_size=500,
         )
         
         st.success(f"File '{file_name}' berhasil diproses (RAG dan Storage)!")
         return True, f"Sukses memproses {file_name}"
 
     except Exception as e:
-        # Jika ada kegagalan, coba rollback entri parent_files
         try:
             supabase.table('parent_files').delete().eq('id', parent_id).execute()
         except Exception as rollback_e:
@@ -148,6 +149,7 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
 
 
 # --- [FUNGSI MODIFIKASI] Menggunakan DB Struktur Baru ---
+# (Sisa kode di bawah ini TIDAK BERUBAH)
 
 @st.cache_data(ttl=60)
 def get_existing_file_hashes(_supabase):
@@ -165,10 +167,8 @@ def get_existing_file_hashes(_supabase):
 def get_document_list(_supabase):
     """[MODIFIKASI] Mengambil daftar dokumen dari tabel 'parent_files'."""
     try:
-        # Jauh lebih cepat!
         response = _supabase.table('parent_files').select('file_name, classification').order('created_at', desc=True).execute()
         if response.data:
-            # Ubah format agar sesuai dengan yang diharapkan kode lama
             return [{"source": item['file_name'], "classification": item['classification']} for item in response.data]
         return []
     except Exception as e:
@@ -179,22 +179,18 @@ def delete_document_from_supabase(filename):
     """[MODIFIKASI] Menghapus file dari DB (parent & chunks) DAN Storage."""
     supabase = st.session_state['supabase']
     try:
-        # 1. Dapatkan parent_id dari tabel parent_files
         parent_response = supabase.table('parent_files').select('id').eq('file_name', filename).execute()
         if not parent_response.data:
             return False, f"File '{filename}' tidak ditemukan di tabel parent_files."
         
         parent_id = parent_response.data[0]['id']
 
-        # 2. Hapus semua chunks terkait dari tabel 'documents'
         st.write(f"Menghapus chunks untuk parent_id: {parent_id}...")
         supabase.table('documents').delete().eq('metadata->>parent_file_id', parent_id).execute()
         
-        # 3. Hapus entri dari tabel 'parent_files'
         st.write(f"Menghapus parent record untuk {filename}...")
         supabase.table('parent_files').delete().eq('id', parent_id).execute()
         
-        # 4. Hapus dari Storage (bucket pdf_documents)
         st.write(f"Menghapus file dari Storage...")
         supabase.storage.from_('pdf_documents').remove([filename])
         
@@ -210,23 +206,19 @@ def get_dashboard_data(_supabase):
     try:
         users_response = _supabase.table('users').select('username, created_at').execute()
         users_data = users_response.data or []
-        
-        # [MODIFIKASI] Ambil data dari tabel parent_files
         docs_response = _supabase.table('parent_files').select('file_name, classification').execute()
         docs_data = docs_response.data or []
-        
         return users_data, docs_data
     except Exception as e:
         st.error(f"Gagal memuat data dashboard: {e}")
         return [], []
 
 def create_user_chart(users_data):
-    # ... (Tidak ada perubahan di sini) ...
     if not users_data:
         return st.info("Belum ada data pengguna.")
     df = pd.DataFrame(users_data)
     df['created_at'] = pd.to_datetime(df['created_at'])
-    df_monthly = df.set_index('created_at').resample('M').count()['username'].reset_index()
+    df_monthly = df.set_index('created_at').resample('ME').count()['username'].reset_index() # Menggunakan ME
     df_monthly['created_at'] = df_monthly['created_at'].dt.strftime('%Y-%m')
     chart = alt.Chart(df_monthly).mark_bar().encode(
         x=alt.X('created_at', title='Bulan'),
@@ -236,13 +228,11 @@ def create_user_chart(users_data):
 
 
 def create_doc_chart(docs_data):
-    # [MODIFIKASI] Cara membaca data disesuaikan
     if not docs_data:
         return st.info("Belum ada data dokumen.")
         
     df_source = pd.DataFrame(docs_data)
     
-    # Cek jika kolom 'classification' ada, jika tidak, beri nilai default
     if 'classification' not in df_source.columns:
         df_source['classification'] = 'Lain-lain'
     else:
@@ -267,7 +257,6 @@ def create_doc_chart(docs_data):
 
 
 def init_admin_chat_session():
-    # ... (Tidak ada perubahan di sini, retrieval chain tetap sama) ...
     if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []
     if 'conversation_chain' not in st.session_state:
@@ -293,7 +282,6 @@ def show_admin_page():
     supabase = st.session_state['supabase']
 
     # --- Sidebar Navigasi ---
-    # ... (Tidak ada perubahan di sini) ...
     with st.sidebar:
         st.markdown(f"### Admin Panel, {st.session_state['username']}!")
         st.write("---")
@@ -315,21 +303,20 @@ def show_admin_page():
     st.markdown("<h1 style='text-align: center;'>DIGICHATBOT (ADMIN PANEL)</h1>", unsafe_allow_html=True)
     st.write("---")
     
-    # --- 1. Bagian Dashboard (MODIFIKASI) ---
+    # --- 1. Bagian Dashboard ---
     st.markdown('<h2 id="dashboard">📊 Dashboard</h2>', unsafe_allow_html=True)
-    users_data, docs_data = get_dashboard_data(supabase) # Fungsi ini sudah di-cache
+    users_data, docs_data = get_dashboard_data(supabase)
     col_dash_1, col_dash_2 = st.columns([1, 2])
     with col_dash_1:
         st.metric("Total Pengguna", len(users_data))
-        # [MODIFIKASI] Menghitung dari docs_data (dari tabel parent_files)
         st.metric("Total Dokumen", len(docs_data))
     with col_dash_2:
-        create_doc_chart(docs_data) # Fungsi ini sudah dimodifikasi
+        create_doc_chart(docs_data)
     st.markdown("---")
     create_user_chart(users_data)
     st.divider()
 
-    # --- 2. Bagian Manajemen Dokumen (LOGIKA INTI DIMODIFIKASI) ---
+    # --- 2. Bagian Manajemen Dokumen ---
     st.markdown('<h2 id="manajemen-dokumen">📄 Manajemen Dokumen</h2>', unsafe_allow_html=True)
     st.subheader("Unggah Dokumen Baru")
     
@@ -342,7 +329,6 @@ def show_admin_page():
         type="pdf"
     )
     
-    # --- [LOGIKA TOMBOL OPTIMAL] ---
     if st.button("Proses Dokumen", use_container_width=True, type="primary"):
         if not pdf_docs:
             st.warning("Silakan unggah setidaknya satu file PDF.")
@@ -350,7 +336,6 @@ def show_admin_page():
             st.warning("Silakan pilih klasifikasi dokumen.")
         else:
             with st.spinner("Memproses file... Ini mungkin butuh waktu lama..."):
-                # [OPTIMAL] Ambil hash yang sudah ada SATU KALI
                 existing_hashes = get_existing_file_hashes(supabase)
                 all_successful = True 
                 
@@ -358,20 +343,19 @@ def show_admin_page():
                     sanitized_name = pdf.name.replace(" ", "_")
                     st.markdown(f"--- \n ### Memproses: {sanitized_name}")
                     
-                    # Baca konten file dan hitung hash
                     pdf.seek(0)
                     file_content = pdf.read()
                     file_hash = hashlib.md5(file_content).hexdigest()
                     
-                    # [OPTIMAL] Cek duplikat berdasarkan HASH, bukan nama
                     if file_hash in existing_hashes:
                         st.warning(f"File '{sanitized_name}' (hash: {file_hash[:7]}...) sudah ada di database. Proses dilewati.")
                         continue
                         
-                    # Reset pointer file untuk 'unstructured'
                     pdf.seek(0)
                     
-                    # Panggil fungsi master yang baru
+                    # --- PERBAIKAN LOGIKA INTI ---
+                    # Memanggil fungsi baru (process_and_store_document)
+                    # yang menggunakan 'partition_pdf' dengan 'by_title'
                     success, message = process_and_store_document(
                         pdf, 
                         file_content, 
@@ -384,41 +368,39 @@ def show_admin_page():
                         all_successful = False
                         st.error(f"Gagal memproses {sanitized_name}: {message}")
                     else:
-                        # Tambahkan hash baru ke set agar tidak diproses ulang di batch yang sama
                         existing_hashes.add(file_hash)
 
             if all_successful:
                 st.success("Semua file baru berhasil diproses!")
-                st.cache_data.clear() # Hapus cache agar list file ter-update
+                st.cache_data.clear()
                 st.rerun()
             else:
                 st.error("Satu atau lebih file gagal diproses. Lihat pesan error di atas.")
                 st.cache_data.clear()
-                st.rerun() # Tetap rerun untuk refresh daftar file
+                st.rerun()
     
     st.markdown("---")
     st.subheader("Database Dokumen Saat Ini")
 
     # --- Bagian Konfirmasi Hapus ---
     if st.session_state.file_to_delete:
-        # ... (Tidak ada perubahan di sini) ...
         with st.container():
             file_name = st.session_state.file_to_delete
             st.warning(f"**Konfirmasi Penghapusan**\n\nYakin ingin menghapus **'{file_name}'**? Ini akan menghapus file dari Storage DAN semua data vektor terkait.", icon="⚠️")
             col1, col2, _ = st.columns([1, 1, 5])
             if col1.button("✅ Ya, Hapus", use_container_width=True, type="primary"):
                 with st.spinner(f"Menghapus '{file_name}' dan semua datanya..."):
-                    success, message = delete_document_from_supabase(file_name) # Fungsi ini sudah dimodifikasi
+                    success, message = delete_document_from_supabase(file_name)
                     st.toast(message, icon="✅" if success else "❌")
                     st.session_state.file_to_delete = None 
-                    st.cache_data.clear() # Hapus cache
+                    st.cache_data.clear()
                     st.rerun() 
             if col2.button("❌ Batal", use_container_width=True):
                 st.session_state.file_to_delete = None
                 st.rerun()
 
-    # --- Daftar Dokumen (MODIFIKASI) ---
-    document_list = get_document_list(supabase) # Fungsi ini sudah di-cache & dimodifikasi
+    # --- Daftar Dokumen ---
+    document_list = get_document_list(supabase) 
     if document_list:
         with st.container(height=400): 
             for meta in document_list:
@@ -438,7 +420,6 @@ def show_admin_page():
     st.divider()
 
     # --- 3. Bagian Manajemen Pengguna ---
-    # ... (Tidak ada perubahan di sini) ...
     st.markdown('<h2 id="manajemen-pengguna">👤 Manajemen Pengguna</h2>', unsafe_allow_html=True)
     col_user_1, col_user_2 = st.columns(2)
     with col_user_1:
@@ -460,7 +441,7 @@ def show_admin_page():
                                 hashed_pass = hash_password(new_password)
                                 supabase.table('users').insert({"username": new_username, "hashed_password": hashed_pass}).execute()
                                 st.success(f"Pengguna '{new_username}' berhasil ditambahkan!")
-                                st.cache_data.clear() # Hapus cache dashboard
+                                st.cache_data.clear()
                                 st.rerun()
                         except Exception as e:
                             st.error(f"Gagal menambahkan pengguna: {e}")
@@ -468,7 +449,7 @@ def show_admin_page():
                     st.warning("Username dan password tidak boleh kosong.")
     with col_user_2:
         st.subheader("Daftar Pengguna Saat Ini")
-        users_data, _ = get_dashboard_data(supabase) # Ambil data pengguna
+        users_data, _ = get_dashboard_data(supabase)
         if users_data:
             with st.container(height=400):
                 for user in users_data:
@@ -480,7 +461,6 @@ def show_admin_page():
     st.divider()
 
     # --- 4. Expander Test Chatbot ---
-    # ... (Tidak ada perubahan di sini) ...
     with st.expander("🤖 Test Chatbot (Admin)", expanded=False):
         chat_container = st.container(height=500)
         with chat_container:
@@ -494,9 +474,11 @@ def show_admin_page():
 
         user_question = st.chat_input("Ajukan pertanyaan disini...")
         if user_question:
+            st.session_state.chat_history.append(HumanMessage(content=user_question))
             with st.chat_message("user"):
                 st.markdown(user_question)
-            with st.spinner("DIGICHATBOT sedang memproses..."):
+            with st.spinner("DIGICHATBOT (Admin) sedang memproses..."):
                 response = st.session_state.conversation_chain({'question': user_question})
-                st.session_state.chat_history = response['chat_history']
+                ai_answer = response.get('answer', 'Error')
+                st.session_state.chat_history.append(AIMessage(content=ai_answer))
                 st.rerun()
