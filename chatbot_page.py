@@ -19,7 +19,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
     genai.configure(api_key=google_api_key)
     llm = ChatGoogleGenerativeAI(
         model="models/gemini-2.5-pro",
-        temperature=0.2, 
+        temperature=0.3, 
         convert_system_message_to_human=True,
         google_api_key=google_api_key
     )
@@ -38,7 +38,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
     Konteks:
     {context}
 
-    Pertanyaan:
+    Pertanyaan/promt:
     {question}
 
     Aturan Jawaban:
@@ -47,6 +47,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
     3. Setelah memberikan jawaban (jika ditemukan), SELALU tambahkan kalimat di baris baru: "Apakah ada yang bisa saya bantu lagi?"
     4. Jika informasi tidak ada di dalam konteks atau Anda tidak tahu, jawab bahwa anda tidak tahu konteks tersebut dan bilang bahwa anda bisa tanyakan langsung ke Bu Intan."
     5. Jangan mengarang jawaban di luar konteks.
+    6. jika memungkinkan menjawabn dengan list buatkan dengan list, pokoknya gimana caranya jawaban dapat dibaca dengan user dengan mudah
 
     Jawaban (langsung, sopan, dan ikuti aturan):
     """
