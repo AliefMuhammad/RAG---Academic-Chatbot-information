@@ -20,3 +20,11 @@ umap-learn
 plotly
 bcrypt
 altair
+"unstructured[pdf]"
+"unstructured[all-docs]"
+lxml 
+pillow
+"unstructured[local-inference]"
+flashrank
+FlashrankRerank
+langchain-classic

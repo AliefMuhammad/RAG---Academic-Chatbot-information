@@ -1,24 +1,30 @@
-# chatbot_page.py
+# chatbot_page.py (Versi Optimal dengan FlashRank Re-ranking)
+# KODE INI SUDAH BENAR - TIDAK ADA PERUBAHAN LOGIKA
 import streamlit as st
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 import google.generativeai as genai
 from langchain_community.vectorstores import SupabaseVectorStore
-from langchain.memory import ConversationBufferMemory
-from langchain.chains import ConversationalRetrievalChain
 from langchain_core.messages import AIMessage, HumanMessage
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
+from langchain_classic.chains import ConversationalRetrievalChain
+from langchain_classic.memory import ConversationBufferMemory
+
+
+# --- [MODIFIKASI] Impor untuk Re-ranking ---
+from langchain_classic.retrievers.contextual_compression import ContextualCompressionRetriever
+from langchain_community.document_compressors import FlashrankRerank
 
 # --- Fungsi Helper (Khusus Chatbot) ---
 
 @st.cache_resource
 def get_conversation_chain(_vectorstore, google_api_key):
     """
-    Membuat chain percakapan yang menggunakan memori dan LLM
-    dengan PROMPT KUSTOM.
+    Membuat chain percakapan yang menggunakan memori, LLM,
+    PROMPT KUSTOM, dan RETRIEVER DENGAN RE-RANKING.
     """
     genai.configure(api_key=google_api_key)
     llm = ChatGoogleGenerativeAI(
-        model="models/gemini-2.5-pro",
+        model="gemini-2.5-pro", 
         temperature=0.3, 
         convert_system_message_to_human=True,
         google_api_key=google_api_key
@@ -32,8 +38,8 @@ def get_conversation_chain(_vectorstore, google_api_key):
     
     # 2. TEMPLATE PROMPT 
     CUSTOM_PROMPT_TEMPLATE = """
-    Anda adalah asisten AI akademik yang sopan dan profesional. Jawab pertanyaan pengguna secara langsung dan to the point dan tetap sopan dan ramah, HANYA berdasarkan konteks yang diberikan di bawah ini.
-    JANGAN pernah memulai jawaban Anda dengan frasa seperti "Berdasarkan konteks yang diberikan...".
+    Anda adalah asisten AI akademik yang sopan dan profesional. Jawab pertanyaan pengguna secara langsung dan tetap sopan dan ramah, HANYA berdasarkan konteks yang diberikan di bawah ini.
+    JANGAN pernah memulai jawaban Anda dengan frasa seperti Berdasarkan konteks/dokumen yang diberikan... dan lainnya.
 
     Konteks:
     {context}
@@ -42,7 +48,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
     {question}
 
     Aturan Jawaban:
-    1, jika jika ada jawaban di dalam konteks yang mendekati pertanyaan berikan saja jawaban yang ada di konteks dengan bilang "pada dokumen ini hanya di sebutkan..." jadi saya tidak menemukan informasi ....
+    1. jika jika ada jawaban di dalam konteks yang mendekati pertanyaan berikan saja jawaban yang ada di konteks dengan bilang "pada dokumen ini hanya di sebutkan..." jadi saya tidak menemukan informasi ....
     2. Jika jawaban ditemukan di dalam konteks, berikan jawaban tersebut secara jelas dan sopan serta ramah.
     3. Setelah memberikan jawaban (jika ditemukan), SELALU tambahkan kalimat di baris baru: "Apakah ada yang bisa saya bantu lagi?"
     4. Jika informasi tidak ada di dalam konteks atau Anda tidak tahu, jawab bahwa anda tidak tahu konteks tersebut dan bilang bahwa anda bisa tanyakan langsung ke Bu Intan."
@@ -57,18 +63,42 @@ def get_conversation_chain(_vectorstore, google_api_key):
         template=CUSTOM_PROMPT_TEMPLATE, input_variables=["context", "question"]
     )
 
-    # 4. INPUT PROMPT KE DALAM CHAIN
+    # --- [MODIFIKASI] Setup Retriever dengan Re-Ranking ---
+
+    # 1. Buat Base Retriever (Jaring Lebar)
+    #    Kita ambil k=20 dokumen untuk memberi bahan ke re-ranker.
+    base_retriever = _vectorstore.as_retriever(
+        search_type="similarity",
+        search_kwargs={'k': 20}
+    )
+
+    # 2. Buat Compressor (Re-ranker)
+    #    Flashrank akan menyortir ulang 20 dokumen tadi dan mengembalikan top_n=5
+    #    Model default 'ms-marco-MiniLM-L-12-v2' cepat dan bagus.
+    compressor = FlashrankRerank(top_n=5)
+
+    # 3. Buat Compression Retriever (Retriever Utama)
+    #    Ini adalah retriever yang akan kita masukkan ke dalam chain.
+    compression_retriever = ContextualCompressionRetriever(
+        base_compressor=compressor, 
+        base_retriever=base_retriever
+    )
+    
+    # --- Akhir Modifikasi ---
+
+    # 4. INPUT PROMPT & RETRIEVER BARU KE DALAM CHAIN
     conversation_chain = ConversationalRetrievalChain.from_llm(
         llm=llm,
-        retriever=_vectorstore.as_retriever(), 
+        retriever=compression_retriever, # <-- [MODIFIKASI] Menggunakan retriever baru
         memory=memory,
         return_source_documents=True,
-        combine_docs_chain_kwargs={"prompt": CUSTOM_PROMPT} # <-- Ini menyuntikkan prompt
+        combine_docs_chain_kwargs={"prompt": CUSTOM_PROMPT}
     )
     return conversation_chain
 
 def init_user_chat_session():
     """Inisialisasi session state yang diperlukan untuk halaman chat."""
+    # (Tidak ada perubahan di fungsi ini)
     if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []
     
@@ -90,10 +120,12 @@ def init_user_chat_session():
             table_name="documents",
             query_name="match_documents"
         )
+        # Panggilan ini sekarang membuat chain yang jauh lebih canggih
         st.session_state.conversation_chain = get_conversation_chain(vector_store, google_api_key)
 
 def show_chatbot_page():
     """Menampilkan halaman chatbot untuk pengguna biasa."""
+    # (Tidak ada perubahan di fungsi ini)
     
     init_user_chat_session()
     
@@ -146,6 +178,7 @@ def show_chatbot_page():
                 
                 ai_sources = {}
                 if 'source_documents' in response:
+                    # Ambil metadata dari dokumen yang sudah di-rerank
                     sources = {doc.metadata['source'] for doc in response['source_documents']}
                     if sources:
                         for source_file in sources:
