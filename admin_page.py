@@ -2,7 +2,7 @@
 import streamlit as st
 import tempfile
 import os
-import logging # <-- Import untuk membungkam warning
+import logging
 
 # --- Import Kunci ---
 from unstructured.partition.pdf import partition_pdf
@@ -11,7 +11,6 @@ import hashlib
 import uuid
 
 # --- Hapus import yang tidak perlu ---
-# from langchain_text_splitters import RecursiveCharacterTextSplitter # <-- HAPUS INI
 
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 import google.generativeai as genai

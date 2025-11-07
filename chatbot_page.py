@@ -1,5 +1,4 @@
 # chatbot_page.py (Versi Optimal dengan FlashRank Re-ranking)
-# KODE INI SUDAH BENAR - TIDAK ADA PERUBAHAN LOGIKA
 import streamlit as st
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 import google.generativeai as genai
@@ -8,7 +7,6 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompts import PromptTemplate
 from langchain_classic.chains import ConversationalRetrievalChain
 from langchain_classic.memory import ConversationBufferMemory
-
 
 # --- [MODIFIKASI] Impor untuk Re-ranking ---
 from langchain_classic.retrievers.contextual_compression import ContextualCompressionRetriever
@@ -24,7 +22,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
     """
     genai.configure(api_key=google_api_key)
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-pro", 
+        model="gemini-2.5-pro",
         temperature=0.3, 
         convert_system_message_to_human=True,
         google_api_key=google_api_key
@@ -72,13 +70,8 @@ def get_conversation_chain(_vectorstore, google_api_key):
         search_kwargs={'k': 20}
     )
 
-    # 2. Buat Compressor (Re-ranker)
-    #    Flashrank akan menyortir ulang 20 dokumen tadi dan mengembalikan top_n=5
-    #    Model default 'ms-marco-MiniLM-L-12-v2' cepat dan bagus.
-    compressor = FlashrankRerank(top_n=5)
+    compressor = FlashrankRerank(top_n=3)
 
-    # 3. Buat Compression Retriever (Retriever Utama)
-    #    Ini adalah retriever yang akan kita masukkan ke dalam chain.
     compression_retriever = ContextualCompressionRetriever(
         base_compressor=compressor, 
         base_retriever=base_retriever
@@ -89,7 +82,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
     # 4. INPUT PROMPT & RETRIEVER BARU KE DALAM CHAIN
     conversation_chain = ConversationalRetrievalChain.from_llm(
         llm=llm,
-        retriever=compression_retriever, # <-- [MODIFIKASI] Menggunakan retriever baru
+        retriever=compression_retriever,
         memory=memory,
         return_source_documents=True,
         combine_docs_chain_kwargs={"prompt": CUSTOM_PROMPT}
@@ -143,11 +136,11 @@ def show_chatbot_page():
             st.rerun()
     
     # --- Area Chat Utama ---
-    st.markdown("<h1 style='text_align: center;'>DIGICHATBOT</h1>", unsafe_allow_html=True)
-    st.markdown("<div style='text_align: center;'>Tanyakan informasi akademik di sini</div>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>DIGICHATBOT</h1>", unsafe_allow_html=True)
+    st.markdown("<div style='text-align: center;'>Tanyakan informasi akademik di sini</div>", unsafe_allow_html=True)
     st.write("---")
 
-    # Tampilkan Sumber
+    # Tampilkan Riwayat Chat
     for message in st.session_state.chat_history:
         if isinstance(message, HumanMessage):
             with st.chat_message("user"): 
@@ -179,6 +172,8 @@ def show_chatbot_page():
                 ai_sources = {}
                 if 'source_documents' in response:
                     # Ambil metadata dari dokumen yang sudah di-rerank
+                    # Ini sudah benar, karena response['source_documents']
+                    # sekarang hanya berisi top_n=3 dokumen
                     sources = {doc.metadata['source'] for doc in response['source_documents']}
                     if sources:
                         for source_file in sources:
