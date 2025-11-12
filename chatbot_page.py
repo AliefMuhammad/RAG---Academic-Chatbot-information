@@ -5,11 +5,11 @@ import google.generativeai as genai
 from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompts import PromptTemplate
-from langchain_classic.chains import ConversationalRetrievalChain
-from langchain_classic.memory import ConversationBufferMemory
+from langchain.chains import ConversationalRetrievalChain
+from langchain.memory import ConversationBufferMemory
 
 # --- [MODIFIKASI] Impor untuk Re-ranking ---
-from langchain_classic.retrievers.contextual_compression import ContextualCompressionRetriever
+from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
 from langchain_community.document_compressors import FlashrankRerank
 
 # --- Fungsi Helper (Khusus Chatbot) ---

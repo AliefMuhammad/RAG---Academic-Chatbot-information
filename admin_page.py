@@ -1,17 +1,17 @@
-# admin_page.py (Perbaikan Chunking dengan strategy="by_title")
+# admin_page.py (Versi dengan Logging Detail untuk Debugging)
 import streamlit as st
 import tempfile
 import os
 import logging
+import traceback 
+import hashlib
+import uuid
 
 # --- Import Kunci ---
 from unstructured.partition.pdf import partition_pdf
 from unstructured.cleaners.core import clean_extra_whitespace, clean_non_ascii_chars
-import hashlib
-import uuid
 
-# --- Hapus import yang tidak perlu ---
-
+# --- Import Library Lain ---
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 import google.generativeai as genai
 from langchain_community.vectorstores import SupabaseVectorStore
@@ -24,55 +24,67 @@ import altair as alt
 # Impor fungsi chat dari chatbot_page
 from chatbot_page import get_conversation_chain
 
-# --- Sembunyikan Warning 'pdfminer' (dari log Anda) ---
+# --- [MODIFIKASI] Setup Logger ---
+# Ini akan mencetak log ke terminal Anda untuk debugging
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Sembunyikan log 'pdfminer' yang terlalu 'berisik' (dari log Anda)
 logging.getLogger("pdfminer").setLevel(logging.ERROR)
+# --- Akhir Modifikasi ---
+
 
 # --- Fungsi Helper (Auth) ---
 def hash_password(password):
     """Meng-hash password untuk disimpan"""
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
-# --- [FUNGSI DIPERBAIKI] Fungsi Akuisisi Data ---
+# --- [FUNGSI DIPERBAIKI] Fungsi Akuisisi Data dengan LOGGING ---
 
 def process_and_store_document(pdf_file_object, file_content, file_name, classification, file_hash):
     """
-    Fungsi master untuk memproses satu PDF:
-    1. Parsing "hi-res" DENGAN chunking "by_title"
-    2. Membuat parent record di DB
-    3. Mengunggah file ke Storage
-    4. Membuat chunks/documents DARI ELEMEN YANG SUDAH DI-CHUNK
-    5. Menyimpan chunks & embeddings ke vector store
+    Fungsi master untuk memproses satu PDF dengan logging langkah-demi-langkah.
     """
     supabase = st.session_state['supabase']
     google_api_key = st.session_state['google_api_key']
-    parent_id = str(uuid.uuid4()) # ID unik untuk file induk ini
+    parent_id = str(uuid.uuid4())
+    
+    logger.info(f"[START] Memulai proses untuk file: {file_name} (ID: {parent_id})")
 
     try:
-        # --- Langkah 1: Parsing PDF dengan Unstructured (STRATEGI BARU) ---
-        st.write(f"Memulai 'unstructured' parsing untuk {file_name}...")
+        # --- Langkah 1: Parsing PDF dengan Unstructured ---
+        st.write(f"Langkah 1/4: Memulai 'unstructured' parsing untuk {file_name}...")
+        logger.info(f"[Langkah 1] Memulai partition_pdf (strategy=hi_res) untuk {file_name}")
+        
         elements = partition_pdf(
             file=pdf_file_object,
             strategy="hi_res", 
             infer_table_structure=True,
-            ocr_languages="ind+eng", # Tetap gunakan ini
+            # --- [PERBAIKAN] Mengganti kwarg yang deprecated (dari log Anda) ---
+            languages=["ind", "eng"], 
             extract_images_in_pdf=False,
             
-            # --- PERBAIKAN UTAMA: CHUNKING CERDAS ---
+            # --- Chunking Cerdas ---
             chunking_strategy="by_title",
             max_characters=4000,
             combine_text_under_n_chars=2000,
             new_after_n_chars=3800,
-            # --- AKHIR PERBAIKAN ---
         )
+        
         st.write(f"Parsing selesai. Ditemukan {len(elements)} CHUNKS logis.")
+        logger.info(f"partition_pdf selesai. Menemukan {len(elements)} elemen.")
 
         # --- Langkah 2: Buat Dokumen LangChain dari Elemen/Chunks ---
+        st.write("Langkah 2/4: Membersihkan teks dan membuat Dokumen LangChain...")
+        logger.info(f"[Langkah 2] Memulai pembersihan dan pembuatan Dokumen LangChain...")
         documents = []
         for el in elements:
             element_type = el.category
             page_number = el.metadata.page_number
             
-            # Teks sekarang sudah di-chunk dengan baik (bukan per kata)
             if element_type == "Table":
                 text = el.metadata.text_as_html
             else:
@@ -84,7 +96,6 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
             if not text.strip():
                 continue 
 
-            # Kita tidak perlu text_splitter lagi, 'el' sudah merupakan chunk
             new_metadata = {
                 "source": file_name,
                 "classification": classification,
@@ -96,35 +107,46 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
             documents.append(Document(page_content=text, metadata=new_metadata))
 
         if not documents:
+            logger.warning(f"Tidak ada teks yang diekstrak dari {file_name}. Proses dihentikan.")
             return False, f"Tidak ada teks yang bisa diekstrak dari {file_name}."
 
-        st.write(f"Membuat {len(documents)} vektor dari {file_name}...")
+        st.write(f"Selesai membuat {len(documents)} dokumen. Memulai penyimpanan...")
+        logger.info(f"Selesai membuat {len(documents)} dokumen.")
 
         # --- Langkah 3: Simpan ke Database (Atomik) ---
         
         # 3a. Buat entri di tabel file induk (parent_files)
+        st.write("Langkah 3/4: Menyimpan data ke Database...")
+        logger.info(f"[Langkah 3a] Menyimpan record ke tabel 'parent_files'...")
         supabase.table('parent_files').insert({
             "id": parent_id,
             "file_name": file_name,
             "file_hash": file_hash,
             "classification": classification
         }).execute()
+        logger.info("Sukses menyimpan ke 'parent_files'.")
         
         # 3b. Unggah file PDF asli ke Supabase Storage
+        logger.info(f"[Langkah 3b] Mengunggah file '{file_name}' ke Supabase Storage...")
         try:
             supabase.storage.from_('pdf_documents').upload(
                 path=file_name,
                 file=file_content,
                 file_options={"content-type": "application/pdf", "upsert": "true"}
             )
+            logger.info("Sukses mengunggah ke Storage.")
         except Exception as storage_error:
             if "Duplicate" not in str(storage_error) and "409" not in str(storage_error):
                 raise storage_error 
+            logger.warning(f"File {file_name} sudah ada di Storage. Melanjutkan...")
 
         # 3c. Simpan text chunks dan embeddings ke Database (tabel documents)
+        st.write("Langkah 4/4: Membuat embedding dan menyimpannya ke Vector Store...")
+        logger.info(f"[Langkah 3c] Mengkonfigurasi GoogleGenerativeAIEmbeddings...")
         genai.configure(api_key=google_api_key)
         embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=google_api_key)
         
+        logger.info("Memulai SupabaseVectorStore.from_documents... (Ini adalah proses embedding & insert ke DB)")
         SupabaseVectorStore.from_documents(
             documents=documents,
             embedding=embeddings,
@@ -133,17 +155,38 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
             query_name="match_documents",
             chunk_size=500,
         )
+        logger.info(f"Sukses! Embedding dan penyimpanan vektor selesai untuk {file_name}.")
         
         st.success(f"File '{file_name}' berhasil diproses (RAG dan Storage)!")
+        logger.info(f"[END] Pemrosesan {file_name} (ID: {parent_id}) - SUKSES")
         return True, f"Sukses memproses {file_name}"
 
     except Exception as e:
+        # --- [MODIFIKASI] Logging Eror yang Jauh Lebih Baik ---
+        st.error(f"GAGAL TOTAL memproses '{file_name}'.")
+
+        # Ini akan mencetak eror LENGKAP ke terminal Anda
+        logger.error(f"GAGAL TOTAL memproses {file_name} (ID: {parent_id}). Eror: {str(e)}")
+        logger.error(f"Traceback lengkap:\n{traceback.format_exc()}")
+
+        # Tampilkan eror yang lebih spesifik di UI jika mungkin
+        if "importlib" in str(e):
+             st.error(f"Eror Kritis (Module): {e}. Coba perbaiki environment Anda. Jalankan: pip install \"importlib-metadata<5.0.0\"")
+        elif "poppler" in str(e):
+             st.error(f"Eror Kritis (Dependensi): {e}. Pastikan 'poppler' terinstal. Jalankan: brew install poppler")
+        else:
+            # Tampilkan traceback di UI agar bisa di-copy
+            with st.expander("Klik untuk melihat detail eror teknis"):
+                st.code(traceback.format_exc())
+
+        logger.info(f"Memulai rollback untuk {parent_id}...")
         try:
             supabase.table('parent_files').delete().eq('id', parent_id).execute()
+            logger.info(f"Rollback {parent_id} berhasil.")
         except Exception as rollback_e:
-            st.error(f"Error saat proses: {e}. Gagal rollback parent_files: {rollback_e}")
+            st.error(f"Gagal melakukan rollback. Silakan hapus manual parent_id: {parent_id}")
+            logger.error(f"GAGAL ROLLBACK untuk {parent_id}. Eror: {rollback_e}")
             
-        st.error(f"GAGAL TOTAL memproses '{file_name}': {e}")
         return False, str(e)
 
 
@@ -153,6 +196,7 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
 @st.cache_data(ttl=60)
 def get_existing_file_hashes(_supabase):
     """[BARU] Mengambil semua hash file yang sudah ada dari tabel parent_files."""
+    logger.info("Mengambil cache hash file...")
     try:
         response = _supabase.table('parent_files').select('file_hash').execute()
         if response.data:
@@ -160,11 +204,13 @@ def get_existing_file_hashes(_supabase):
         return set()
     except Exception as e:
         st.error(f"Gagal mengambil hash file: {e}")
+        logger.error(f"Gagal mengambil hash file: {e}")
         return set()
 
 @st.cache_data(ttl=60)
 def get_document_list(_supabase):
     """[MODIFIKASI] Mengambil daftar dokumen dari tabel 'parent_files'."""
+    logger.info("Mengambil daftar dokumen...")
     try:
         response = _supabase.table('parent_files').select('file_name, classification').order('created_at', desc=True).execute()
         if response.data:
@@ -172,31 +218,37 @@ def get_document_list(_supabase):
         return []
     except Exception as e:
         st.error(f"Gagal mengambil daftar file dari Supabase: {e}")
+        logger.error(f"Gagal mengambil daftar file: {e}")
         return []
 
 def delete_document_from_supabase(filename):
     """[MODIFIKASI] Menghapus file dari DB (parent & chunks) DAN Storage."""
     supabase = st.session_state['supabase']
+    logger.info(f"Memulai proses hapus untuk: {filename}")
     try:
         parent_response = supabase.table('parent_files').select('id').eq('file_name', filename).execute()
         if not parent_response.data:
+            logger.warning(f"File '{filename}' tidak ditemukan di parent_files saat akan dihapus.")
             return False, f"File '{filename}' tidak ditemukan di tabel parent_files."
         
         parent_id = parent_response.data[0]['id']
 
-        st.write(f"Menghapus chunks untuk parent_id: {parent_id}...")
+        logger.info(f"Menghapus chunks untuk parent_id: {parent_id}...")
         supabase.table('documents').delete().eq('metadata->>parent_file_id', parent_id).execute()
         
-        st.write(f"Menghapus parent record untuk {filename}...")
+        logger.info(f"Menghapus parent record untuk {filename}...")
         supabase.table('parent_files').delete().eq('id', parent_id).execute()
         
-        st.write(f"Menghapus file dari Storage...")
+        logger.info(f"Menghapus file dari Storage...")
         supabase.storage.from_('pdf_documents').remove([filename])
         
+        logger.info(f"Sukses menghapus {filename}")
         return True, f"Dokumen '{filename}' (dan semua chunks-nya) berhasil dihapus."
     except Exception as e:
         if "No such object" in str(e):
+             logger.warning(f"Sukses hapus {filename} dari DB, tapi tidak ada di Storage.")
              return True, f"Dokumen '{filename}' berhasil dihapus dari DB (tidak ditemukan di Storage)."
+        logger.error(f"Gagal menghapus {filename}: {e}\n{traceback.format_exc()}")
         return False, f"Gagal menghapus dokumen: {e}"
 
 # --- FUNGSI Helper Dashboard (MODIFIKASI) ---
@@ -210,6 +262,7 @@ def get_dashboard_data(_supabase):
         return users_data, docs_data
     except Exception as e:
         st.error(f"Gagal memuat data dashboard: {e}")
+        logger.error(f"Gagal memuat data dashboard: {e}")
         return [], []
 
 def create_user_chart(users_data):
@@ -217,7 +270,7 @@ def create_user_chart(users_data):
         return st.info("Belum ada data pengguna.")
     df = pd.DataFrame(users_data)
     df['created_at'] = pd.to_datetime(df['created_at'])
-    df_monthly = df.set_index('created_at').resample('ME').count()['username'].reset_index() # Menggunakan ME
+    df_monthly = df.set_index('created_at').resample('ME').count()['username'].reset_index()
     df_monthly['created_at'] = df_monthly['created_at'].dt.strftime('%Y-%m')
     chart = alt.Chart(df_monthly).mark_bar().encode(
         x=alt.X('created_at', title='Bulan'),
@@ -340,21 +393,23 @@ def show_admin_page():
                 
                 for pdf in pdf_docs:
                     sanitized_name = pdf.name.replace(" ", "_")
+                    logger.info(f"Mulai loop untuk file: {sanitized_name}")
                     st.markdown(f"--- \n ### Memproses: {sanitized_name}")
                     
                     pdf.seek(0)
                     file_content = pdf.read()
                     file_hash = hashlib.md5(file_content).hexdigest()
+                    logger.info(f"File: {sanitized_name}, Hash: {file_hash}")
                     
                     if file_hash in existing_hashes:
                         st.warning(f"File '{sanitized_name}' (hash: {file_hash[:7]}...) sudah ada di database. Proses dilewati.")
+                        logger.info(f"Hash {file_hash} sudah ada. Dilewati.")
                         continue
                         
                     pdf.seek(0)
                     
-                    # --- PERBAIKAN LOGIKA INTI ---
-                    # Memanggil fungsi baru (process_and_store_document)
-                    # yang menggunakan 'partition_pdf' dengan 'by_title'
+                    # --- Memanggil fungsi baru dengan logging ---
+                    logger.info(f"Memanggil 'process_and_store_document' untuk {sanitized_name}")
                     success, message = process_and_store_document(
                         pdf, 
                         file_content, 
@@ -365,9 +420,11 @@ def show_admin_page():
                     
                     if not success:
                         all_successful = False
-                        st.error(f"Gagal memproses {sanitized_name}: {message}")
+                        st.error(f"Gagal memproses {sanitized_name}. Lihat detail di atas atau di terminal.")
+                        logger.error(f"Loop selesai dengan GAGAL untuk {sanitized_name}. Pesan: {message}")
                     else:
                         existing_hashes.add(file_hash)
+                        logger.info(f"Loop selesai dengan SUKSES untuk {sanitized_name}.")
 
             if all_successful:
                 st.success("Semua file baru berhasil diproses!")
@@ -433,8 +490,9 @@ def show_admin_page():
                         st.error("Tidak dapat membuat pengguna dengan nama 'admin'.")
                     else:
                         try:
-                            data, count = supabase.table('users').select('username').eq('username', new_username).execute()
-                            if data and len(data[1]) > 0:
+                            # Logika cek pengguna
+                            response = supabase.table('users').select('username').eq('username', new_username).execute()
+                            if response.data:
                                 st.warning(f"Username '{new_username}' sudah ada.")
                             else:
                                 hashed_pass = hash_password(new_password)
@@ -444,6 +502,7 @@ def show_admin_page():
                                 st.rerun()
                         except Exception as e:
                             st.error(f"Gagal menambahkan pengguna: {e}")
+                            logger.error(f"Gagal tambah pengguna: {e}\n{traceback.format_exc()}")
                 else:
                     st.warning("Username dan password tidak boleh kosong.")
     with col_user_2:

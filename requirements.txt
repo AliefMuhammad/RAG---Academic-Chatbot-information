@@ -1,4 +1,3 @@
-# Core
 streamlit
 pandas
 numpy
@@ -9,19 +8,11 @@ python-dotenv
 bcrypt
 google-generativeai
 supabase
-uuid
-hashlib
-logging
-tempfile
-os
-json
-
-# LangChain Ecosystem
 langchain-core
 langchain-community
 langchain-google-genai
-langchain-classic
-unstructured
-
-# Optional Tools (cleaning & parsing)
 unstructured[local-inference,pdf]
+flashrank 
+pydantic
+poppler
+importlib-metadata<5.0.0
