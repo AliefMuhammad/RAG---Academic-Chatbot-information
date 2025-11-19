@@ -65,7 +65,7 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
             languages=["ind", "eng"], 
             extract_images_in_pdf=False,
             
-            # --- Chunking Cerdas ---
+            # --- new chunking metodh (smart chunk)---
             chunking_strategy="by_title",
             max_characters=4000,
             combine_text_under_n_chars=2000,
@@ -188,7 +188,7 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
         return False, str(e)
 
 
-# --- [FUNGSI MODIFIKASI] Menggunakan DB Struktur Baru ---
+# --- connect to db Supabase ---
 
 @st.cache_data(ttl=60)
 def get_existing_file_hashes(_supabase):
@@ -248,7 +248,7 @@ def delete_document_from_supabase(filename):
         logger.error(f"Gagal menghapus {filename}: {e}\n{traceback.format_exc()}")
         return False, f"Gagal menghapus dokumen: {e}"
 
-# --- FUNGSI Helper Dashboard (MODIFIKASI) ---
+# --- FUNGSI Helper Dashboard ---
 @st.cache_data(ttl=600) 
 def get_dashboard_data(_supabase):
     try:
@@ -323,7 +323,7 @@ def init_admin_chat_session():
     if 'file_to_delete' not in st.session_state:
         st.session_state.file_to_delete = None
 
-# --- Tampilan Utama Halaman Admin (MODIFIKASI LOGIKA UPLOAD) ---
+# --- Tampilan Utama Halaman Admin (LOGIKA UPLOAD) ---
 def show_admin_page():
     """Menampilkan halaman admin dengan panel manajemen di area utama."""
     

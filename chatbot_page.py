@@ -17,7 +17,6 @@ from langchain_community.document_compressors import FlashrankRerank
 
 
 # --- Fungsi Helper (Khusus Chatbot) ---
-
 @st.cache_resource
 def get_conversation_chain(_vectorstore, google_api_key):
     """
@@ -61,7 +60,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
     
     rephrase_prompt = ChatPromptTemplate.from_messages([
         MessagesPlaceholder(variable_name="chat_history"),
-        ("user", REPHRASE_PROMPT_TEMPLATE), # Ini adalah template yang benar
+        ("user", REPHRASE_PROMPT_TEMPLATE),
     ])
     
     # 3. BUAT HISTORY-AWARE RETRIEVER
@@ -91,7 +90,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
     """
     
     # --- [PERBAIKAN] QA Prompt ---
-    # Menggunakan {input} agar konsisten
+    # Menggunakan {input}
     qa_prompt = ChatPromptTemplate.from_messages([
         ("system", SYSTEM_PROMPT),
         MessagesPlaceholder(variable_name="chat_history"),
@@ -134,11 +133,7 @@ def init_user_chat_session():
             table_name="documents",
             query_name="match_documents"
         )
-        
-        # Panggilan ini sekarang membuat chain LCEL yang canggih
         st.session_state.conversation_chain = get_conversation_chain(vector_store, google_api_key)
-
-# ... import dan fungsi get_conversation_chain tetap sama ...
 
 # --- Tambahkan fungsi helper kecil untuk menyimpan log ---
 def save_chat_log(username, question, answer, response_time):
@@ -241,8 +236,7 @@ def show_chatbot_page():
                     placeholder.markdown(full_response)
                     response_time = 0.0
 
-                # --- [BARU] SIMPAN LOG KE SUPABASE ---
-                # Kita lakukan ini setelah respons selesai ditampilkan
+                # --- MENYIMPAN LOG KE SUPABASE ---
                 save_chat_log(
                     username=st.session_state.get('username', 'Anonymous'),
                     question=user_question,
@@ -250,7 +244,7 @@ def show_chatbot_page():
                     response_time=response_time
                 )
 
-                # 3. Proses Sumber (Tetap sama)
+                # 3. Proses Sumber
                 ai_sources = {}
                 if "Bu Intan" not in full_response and source_documents:
                     sources = {doc.metadata['source'] for doc in source_documents}
@@ -261,7 +255,7 @@ def show_chatbot_page():
                                 public_url = supabase.storage.from_('pdf_documents').get_public_url(source_file)
                                 ai_sources[source_file] = public_url
                         except Exception as e:
-                            pass # Silent error handling for sources
+                            pass 
                     
                     if ai_sources:
                         with st.expander("Lihat Sumber Dokumen"):
