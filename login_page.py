@@ -71,8 +71,6 @@ def show_login_page():
     </style>
     """
     st.markdown(page_styling, unsafe_allow_html=True)
-    # --- AKHIR DARI CSS KUSTOM ---
-
 
     st.markdown("<h1 style='text-align: center;'>DIGICHATBOT</h1>", unsafe_allow_html=True)
     st.markdown("<div style='text-align: center;'>Silakan login untuk melanjutkan</div>", unsafe_allow_html=True)

@@ -7,12 +7,11 @@ umap-learn
 python-dotenv
 bcrypt
 google-generativeai
-supabase
+supabase==1.0.3
 langchain-core
 langchain-community
 langchain-google-genai
 unstructured[local-inference,pdf]
 flashrank 
 pydantic
-poppler
 importlib-metadata<5.0.0

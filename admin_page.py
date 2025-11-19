@@ -25,14 +25,13 @@ import altair as alt
 from chatbot_page import get_conversation_chain
 
 # --- [MODIFIKASI] Setup Logger ---
-# Ini akan mencetak log ke terminal Anda untuk debugging
 logging.basicConfig(
     level=logging.INFO, 
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Sembunyikan log 'pdfminer' yang terlalu 'berisik' (dari log Anda)
+
 logging.getLogger("pdfminer").setLevel(logging.ERROR)
 # --- Akhir Modifikasi ---
 
@@ -63,7 +62,6 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
             file=pdf_file_object,
             strategy="hi_res", 
             infer_table_structure=True,
-            # --- [PERBAIKAN] Mengganti kwarg yang deprecated (dari log Anda) ---
             languages=["ind", "eng"], 
             extract_images_in_pdf=False,
             
@@ -162,7 +160,7 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
         return True, f"Sukses memproses {file_name}"
 
     except Exception as e:
-        # --- [MODIFIKASI] Logging Eror yang Jauh Lebih Baik ---
+        # --- [MODIFIKASI] Logging Eror 
         st.error(f"GAGAL TOTAL memproses '{file_name}'.")
 
         # Ini akan mencetak eror LENGKAP ke terminal Anda
@@ -191,7 +189,6 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
 
 
 # --- [FUNGSI MODIFIKASI] Menggunakan DB Struktur Baru ---
-# (Sisa kode di bawah ini TIDAK BERUBAH)
 
 @st.cache_data(ttl=60)
 def get_existing_file_hashes(_supabase):

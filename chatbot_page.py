@@ -1,49 +1,83 @@
-# chatbot_page.py (Versi Optimal dengan FlashRank Re-ranking)
+# chatbot_page.py
 import streamlit as st
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 import google.generativeai as genai
 from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.prompts import PromptTemplate
-from langchain.chains import ConversationalRetrievalChain
-from langchain.memory import ConversationBufferMemory
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+import time 
+
+# --- [MODIFIKASI] Impor untuk LCEL (Streaming) ---
+from langchain.chains import create_history_aware_retriever, create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
 
 # --- [MODIFIKASI] Impor untuk Re-ranking ---
 from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
 from langchain_community.document_compressors import FlashrankRerank
+
 
 # --- Fungsi Helper (Khusus Chatbot) ---
 
 @st.cache_resource
 def get_conversation_chain(_vectorstore, google_api_key):
     """
-    Membuat chain percakapan yang menggunakan memori, LLM,
-    PROMPT KUSTOM, dan RETRIEVER DENGAN RE-RANKING.
+    Membuat chain percakapan RAG yang STATELESS, STREAMABLE,
+    dan menggunakan RE-RANKING.
+    
+    Chain ini dibuat menggunakan LangChain Expression Language (LCEL).
     """
     genai.configure(api_key=google_api_key)
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-pro",
-        temperature=0.3, 
+        model="gemini-3-pro-preview",
+        temperature=0.3,
         convert_system_message_to_human=True,
         google_api_key=google_api_key
     )
     
-    memory = ConversationBufferMemory(
-        memory_key='chat_history', 
-        return_messages=True, 
-        output_key='answer' 
+    # 1. SETUP RETRIEVER (Unchanged)
+    base_retriever = _vectorstore.as_retriever(
+        search_type="similarity",
+        search_kwargs={'k': 20}
     )
+    compressor = FlashrankRerank(top_n=5)
+    compression_retriever = ContextualCompressionRetriever(
+        base_compressor=compressor,
+        base_retriever=base_retriever
+    )
+
+    # --- [PERBAIKAN] Arsitektur LCEL ---
+
+    # 2. PROMPT UNTUK REPHRASE PERTANYAAN
+    #    Menggunakan {input} sesuai standar chain
+    REPHRASE_PROMPT_TEMPLATE = """
+    Given the following conversation and a follow up question, rephrase the 
+    follow up question to be a standalone question, in its original language.
+
+    Chat History:
+    {chat_history}
+
+    Follow Up Input: {input}
+    Standalone question:"""
     
-    # 2. TEMPLATE PROMPT 
-    CUSTOM_PROMPT_TEMPLATE = """
+    rephrase_prompt = ChatPromptTemplate.from_messages([
+        MessagesPlaceholder(variable_name="chat_history"),
+        ("user", REPHRASE_PROMPT_TEMPLATE), # Ini adalah template yang benar
+    ])
+    
+    # 3. BUAT HISTORY-AWARE RETRIEVER
+    history_aware_retriever = create_history_aware_retriever(
+        llm=llm,
+        retriever=compression_retriever,
+        prompt=rephrase_prompt
+    )
+
+    # 4. PROMPT JAWABAN AKHIR (Unchanged System Prompt)
+    SYSTEM_PROMPT = """
     Anda adalah asisten AI akademik yang sopan dan profesional. Jawab pertanyaan pengguna secara langsung dan tetap sopan dan ramah, HANYA berdasarkan konteks yang diberikan di bawah ini.
     JANGAN pernah memulai jawaban Anda dengan frasa seperti Berdasarkan konteks/dokumen yang diberikan... dan lainnya.
 
     Konteks:
     {context}
-
-    Pertanyaan/promt:
-    {question}
 
     Aturan Jawaban:
     1. jika jika ada jawaban di dalam konteks yang mendekati pertanyaan berikan saja jawaban yang ada di konteks dengan bilang "pada dokumen ini hanya di sebutkan..." jadi saya tidak menemukan informasi ....
@@ -51,47 +85,34 @@ def get_conversation_chain(_vectorstore, google_api_key):
     3. Setelah memberikan jawaban (jika ditemukan), SELALU tambahkan kalimat di baris baru: "Apakah ada yang bisa saya bantu lagi?"
     4. Jika informasi tidak ada di dalam konteks atau Anda tidak tahu, jawab bahwa anda tidak tahu konteks tersebut dan bilang bahwa anda bisa tanyakan langsung ke Bu Intan."
     5. Jangan mengarang jawaban di luar konteks.
-    6. jika memungkinkan menjawabn dengan list buatkan dengan list, pokoknya gimana caranya jawaban dapat dibaca dengan user dengan mudah
+    6. jika memungkinkan menjawab dengan list buatkan dengan list, pokoknya gimana caranya jawaban dapat dibaca dengan user dengan mudah
 
     Jawaban (langsung, sopan, dan ikuti aturan):
     """
     
-    # 3. BUAT OBJEK PROMPT
-    CUSTOM_PROMPT = PromptTemplate(
-        template=CUSTOM_PROMPT_TEMPLATE, input_variables=["context", "question"]
-    )
+    # --- [PERBAIKAN] QA Prompt ---
+    # Menggunakan {input} agar konsisten
+    qa_prompt = ChatPromptTemplate.from_messages([
+        ("system", SYSTEM_PROMPT),
+        MessagesPlaceholder(variable_name="chat_history"),
+        ("human", "{input}") 
+    ])
 
-    # --- [MODIFIKASI] Setup Retriever dengan Re-Ranking ---
+    # 5. BUAT CHAIN UNTUK MENJAWAB PERTANYAAN (Unchanged)
+    question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
 
-    # 1. Buat Base Retriever (Jaring Lebar)
-    #    Kita ambil k=20 dokumen untuk memberi bahan ke re-ranker.
-    base_retriever = _vectorstore.as_retriever(
-        search_type="similarity",
-        search_kwargs={'k': 20}
-    )
-
-    compressor = FlashrankRerank(top_n=3)
-
-    compression_retriever = ContextualCompressionRetriever(
-        base_compressor=compressor, 
-        base_retriever=base_retriever
+    # 6. GABUNGKAN SEMUA MENJADI RAG CHAIN FINAL (Unchanged)
+    rag_chain = create_retrieval_chain(
+        history_aware_retriever,
+        question_answer_chain
     )
     
-    # --- Akhir Modifikasi ---
-
-    # 4. INPUT PROMPT & RETRIEVER BARU KE DALAM CHAIN
-    conversation_chain = ConversationalRetrievalChain.from_llm(
-        llm=llm,
-        retriever=compression_retriever,
-        memory=memory,
-        return_source_documents=True,
-        combine_docs_chain_kwargs={"prompt": CUSTOM_PROMPT}
-    )
-    return conversation_chain
+    return rag_chain
 
 def init_user_chat_session():
     """Inisialisasi session state yang diperlukan untuk halaman chat."""
-    # (Tidak ada perubahan di fungsi ini)
+    
+    # History chat sekarang menjadi sumber memori UTAMA
     if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []
     
@@ -113,21 +134,38 @@ def init_user_chat_session():
             table_name="documents",
             query_name="match_documents"
         )
-        # Panggilan ini sekarang membuat chain yang jauh lebih canggih
+        
+        # Panggilan ini sekarang membuat chain LCEL yang canggih
         st.session_state.conversation_chain = get_conversation_chain(vector_store, google_api_key)
+
+# ... import dan fungsi get_conversation_chain tetap sama ...
+
+# --- Tambahkan fungsi helper kecil untuk menyimpan log ---
+def save_chat_log(username, question, answer, response_time):
+    """Fungsi untuk mengirim data log ke Supabase"""
+    try:
+        if 'supabase' in st.session_state:
+            data = {
+                "username": username,
+                "question": question,
+                "answer": answer,
+                "response_time": response_time
+            }
+            st.session_state['supabase'].table('chat_logs').insert(data).execute()
+    except Exception as e:
+        # Kita print error di console saja agar tidak mengganggu user di UI
+        print(f"[Error Log] Gagal menyimpan log: {e}")
 
 def show_chatbot_page():
     """Menampilkan halaman chatbot untuk pengguna biasa."""
-    # (Tidak ada perubahan di fungsi ini)
     
     init_user_chat_session()
     
-    # --- Sidebar Minimalis ---
+    # --- Sidebar (Tetap sama) ---
     with st.sidebar:
         st.markdown(f"### Selamat Datang, {st.session_state['username']}!")
         st.write("---")
         st.markdown("<div style='flex-grow: 1;'></div>", unsafe_allow_html=True)
-        
         if st.button("Log Out", use_container_width=True):
             st.session_state.logged_in = False
             st.session_state.username = None
@@ -135,12 +173,12 @@ def show_chatbot_page():
             st.session_state.conversation_chain = None
             st.rerun()
     
-    # --- Area Chat Utama ---
+    # --- Area Chat Utama (Tetap sama) ---
     st.markdown("<h1 style='text-align: center;'>DIGICHATBOT</h1>", unsafe_allow_html=True)
     st.markdown("<div style='text-align: center;'>Tanyakan informasi akademik di sini</div>", unsafe_allow_html=True)
     st.write("---")
 
-    # Tampilkan Riwayat Chat
+    # --- Tampilkan Riwayat Chat (Tetap sama) ---
     for message in st.session_state.chat_history:
         if isinstance(message, HumanMessage):
             with st.chat_message("user"): 
@@ -148,51 +186,92 @@ def show_chatbot_page():
         elif isinstance(message, AIMessage):
             with st.chat_message("assistant"): 
                 st.markdown(message.content)
+                if "response_time" in message.metadata and message.metadata["response_time"] is not None:
+                    st.markdown(f"<p style='text-align: right; font-size: 0.75em; color: #888888; margin-top: 5px; opacity: 0.7;'>Terjawab dalam {message.metadata['response_time']:.2f} detik</p>", unsafe_allow_html=True)
                 if "sources" in message.metadata and message.metadata["sources"]:
                     with st.expander("Lihat Sumber Dokumen"):
                         for source_file, public_url in message.metadata["sources"].items():
                             st.markdown(f"📄 [{source_file}]({public_url})")
 
-    # Logika Input Baru
-    user_question = st.chat_input("Ajukan pertanyaan disini...")
-
-    if user_question:
+    # --- Logika Input & Streaming (DENGAN PENAMBAHAN LOGGING) ---
+    if user_question := st.chat_input("Ajukan pertanyaan disini..."):
         if st.session_state.conversation_chain is None:
             st.error("Sesi chat tidak terinisialisasi. Coba muat ulang.")
         else:
+            # 1. Tambahkan pesan pengguna ke history
             st.session_state.chat_history.append(HumanMessage(content=user_question))
+            with st.chat_message("user"):
+                st.markdown(user_question)
             
-            with st.spinner("DIGICHATBOT sedang memproses..."):
+            # 2. Streaming respons AI
+            with st.chat_message("assistant"):
+                placeholder = st.empty()
+                full_response = ""
+                source_documents = []
+                response_time = 0.0
                 
-                chain = st.session_state.conversation_chain
-                response = chain({'question': user_question})
-                
-                ai_answer = response.get('answer', 'Maaf, saya tidak menemukan jawaban.')
-                
+                start_time = time.time()
+
+                try:
+                    chat_history_for_chain = st.session_state.chat_history[:-1]
+                    
+                    stream = st.session_state.conversation_chain.stream({
+                        "input": user_question,
+                        "chat_history": chat_history_for_chain
+                    })
+
+                    for chunk in stream:
+                        if "answer" in chunk and chunk["answer"]:
+                            full_response += chunk["answer"]
+                            placeholder.markdown(full_response + "▌")
+                        if "context" in chunk:
+                            source_documents = chunk["context"]
+                    
+                    end_time = time.time()
+                    response_time = end_time - start_time
+                    
+                    placeholder.markdown(full_response)
+                    
+                    # Tampilkan waktu
+                    st.markdown(f"<p style='text-align: right; font-size: 0.75em; color: #888888; margin-top: 5px; opacity: 0.7;'>Terjawab dalam {response_time:.2f} detik</p>", unsafe_allow_html=True)
+
+                except Exception as e:
+                    st.error(f"Terjadi kesalahan: {e}")
+                    full_response = "Maaf, saya mengalami gangguan. Silakan coba lagi atau tanyakan Bu Intan."
+                    placeholder.markdown(full_response)
+                    response_time = 0.0
+
+                # --- [BARU] SIMPAN LOG KE SUPABASE ---
+                # Kita lakukan ini setelah respons selesai ditampilkan
+                save_chat_log(
+                    username=st.session_state.get('username', 'Anonymous'),
+                    question=user_question,
+                    answer=full_response,
+                    response_time=response_time
+                )
+
+                # 3. Proses Sumber (Tetap sama)
                 ai_sources = {}
-                if 'source_documents' in response:
-                    # Ambil metadata dari dokumen yang sudah di-rerank
-                    # Ini sudah benar, karena response['source_documents']
-                    # sekarang hanya berisi top_n=3 dokumen
-                    sources = {doc.metadata['source'] for doc in response['source_documents']}
+                if "Bu Intan" not in full_response and source_documents:
+                    sources = {doc.metadata['source'] for doc in source_documents}
                     if sources:
-                        for source_file in sources:
-                            try:
-                                supabase = st.session_state['supabase']
+                        try:
+                            supabase = st.session_state['supabase']
+                            for source_file in sources:
                                 public_url = supabase.storage.from_('pdf_documents').get_public_url(source_file)
                                 ai_sources[source_file] = public_url
-                            except Exception as e:
-                                st.warning(f"Tidak dapat membuat link untuk {source_file}: {e}")
+                        except Exception as e:
+                            pass # Silent error handling for sources
+                    
+                    if ai_sources:
+                        with st.expander("Lihat Sumber Dokumen"):
+                            for source_file, public_url in ai_sources.items():
+                                st.markdown(f"📄 [{source_file}]({public_url})")
 
-                # Jika jawaban adalah fallback "Bu Intan", jangan tampilkan sumber karna tidak terjawab
-                if "Bu Intan" in ai_answer:
-                    ai_sources = {} 
-
+                # 4. Append history
                 st.session_state.chat_history.append(
                     AIMessage(
-                        content=ai_answer, 
-                        metadata={"sources": ai_sources} 
+                        content=full_response, 
+                        metadata={"sources": ai_sources, "response_time": response_time} 
                     )
                 )
-                
-                st.rerun()
