@@ -163,11 +163,11 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
         # --- [MODIFIKASI] Logging Eror 
         st.error(f"GAGAL TOTAL memproses '{file_name}'.")
 
-        # Ini akan mencetak eror LENGKAP ke terminal Anda
+        # akan mencetak eror LENGKAP ke terminal
         logger.error(f"GAGAL TOTAL memproses {file_name} (ID: {parent_id}). Eror: {str(e)}")
         logger.error(f"Traceback lengkap:\n{traceback.format_exc()}")
 
-        # Tampilkan eror yang lebih spesifik di UI jika mungkin
+        # Tampilkan eror yang lebih spesifik di UI
         if "importlib" in str(e):
              st.error(f"Eror Kritis (Module): {e}. Coba perbaiki environment Anda. Jalankan: pip install \"importlib-metadata<5.0.0\"")
         elif "poppler" in str(e):
