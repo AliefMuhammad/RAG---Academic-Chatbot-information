@@ -22,8 +22,6 @@ def get_conversation_chain(_vectorstore, google_api_key):
     """
     Membuat chain percakapan RAG yang STATELESS, STREAMABLE,
     dan menggunakan RE-RANKING.
-    
-    Chain ini dibuat menggunakan LangChain Expression Language (LCEL).
     """
     genai.configure(api_key=google_api_key)
     llm = ChatGoogleGenerativeAI(
@@ -33,7 +31,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
         google_api_key=google_api_key
     )
     
-    # 1. SETUP RETRIEVER (Unchanged)
+    # 1. SETUP RETRIEVER
     base_retriever = _vectorstore.as_retriever(
         search_type="similarity",
         search_kwargs={'k': 20}
@@ -44,10 +42,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
         base_retriever=base_retriever
     )
 
-    # --- [PERBAIKAN] Arsitektur LCEL ---
-
     # 2. PROMPT UNTUK REPHRASE PERTANYAAN
-    #    Menggunakan {input} sesuai standar chain
     REPHRASE_PROMPT_TEMPLATE = """
     Given the following conversation and a follow up question, rephrase the 
     follow up question to be a standalone question, in its original language.
@@ -70,7 +65,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
         prompt=rephrase_prompt
     )
 
-    # 4. PROMPT JAWABAN AKHIR (Unchanged System Prompt)
+    # 4. PROMPT JAWABAN AKHIR
     SYSTEM_PROMPT = """
     Anda adalah asisten AI akademik yang sopan dan profesional. Jawab pertanyaan pengguna secara langsung dan tetap sopan dan ramah, HANYA berdasarkan konteks yang diberikan di bawah ini.
     JANGAN pernah memulai jawaban Anda dengan frasa seperti Berdasarkan konteks/dokumen yang diberikan... dan lainnya.
@@ -89,18 +84,17 @@ def get_conversation_chain(_vectorstore, google_api_key):
     Jawaban (langsung, sopan, dan ikuti aturan):
     """
     
-    # --- [PERBAIKAN] QA Prompt ---
-    # Menggunakan {input}
+    # QA Prompt
     qa_prompt = ChatPromptTemplate.from_messages([
         ("system", SYSTEM_PROMPT),
         MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}") 
     ])
 
-    # 5. BUAT CHAIN UNTUK MENJAWAB PERTANYAAN (Unchanged)
+    # 5. BUAT CHAIN UNTUK MENJAWAB PERTANYAAN
     question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
 
-    # 6. GABUNGKAN SEMUA MENJADI RAG CHAIN FINAL (Unchanged)
+    # 6. GABUNGKAN SEMUA MENJADI RAG CHAIN FINAL
     rag_chain = create_retrieval_chain(
         history_aware_retriever,
         question_answer_chain
@@ -111,9 +105,12 @@ def get_conversation_chain(_vectorstore, google_api_key):
 def init_user_chat_session():
     """Inisialisasi session state yang diperlukan untuk halaman chat."""
     
-    # History chat sekarang menjadi sumber memori UTAMA
     if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []
+
+    # [FITUR BARU] Inisialisasi trigger pertanyaan cepat
+    if 'prompt_trigger' not in st.session_state:
+        st.session_state.prompt_trigger = None
     
     if 'conversation_chain' not in st.session_state or st.session_state.conversation_chain is None:
         
@@ -135,7 +132,7 @@ def init_user_chat_session():
         )
         st.session_state.conversation_chain = get_conversation_chain(vector_store, google_api_key)
 
-# --- Tambahkan fungsi helper kecil untuk menyimpan log ---
+# --- Fungsi helper untuk log ---
 def save_chat_log(username, question, answer, response_time):
     """Fungsi untuk mengirim data log ke Supabase"""
     try:
@@ -148,7 +145,6 @@ def save_chat_log(username, question, answer, response_time):
             }
             st.session_state['supabase'].table('chat_logs').insert(data).execute()
     except Exception as e:
-        # Kita print error di console saja agar tidak mengganggu user di UI
         print(f"[Error Log] Gagal menyimpan log: {e}")
 
 def show_chatbot_page():
@@ -156,7 +152,7 @@ def show_chatbot_page():
     
     init_user_chat_session()
     
-    # --- Sidebar (Tetap sama) ---
+    # --- Sidebar ---
     with st.sidebar:
         st.markdown(f"### Selamat Datang, {st.session_state['username']}!")
         st.write("---")
@@ -166,14 +162,37 @@ def show_chatbot_page():
             st.session_state.username = None
             st.session_state.chat_history = []
             st.session_state.conversation_chain = None
+            st.session_state.prompt_trigger = None
             st.rerun()
     
-    # --- Area Chat Utama (Tetap sama) ---
+    # --- Area Chat Header ---
     st.markdown("<h1 style='text-align: center;'>DIGICHATBOT</h1>", unsafe_allow_html=True)
     st.markdown("<div style='text-align: center;'>Tanyakan informasi akademik di sini</div>", unsafe_allow_html=True)
     st.write("---")
 
-    # --- Tampilkan Riwayat Chat (Tetap sama) ---
+    # --- [FITUR BARU] Pertanyaan Cepat (FAQ Buttons) ---
+    # Ditampilkan hanya jika chat history masih kosong
+    if not st.session_state.chat_history:
+        st.caption("Pertanyaan yang sering ditanyakan (Klik untuk kirim):")
+        col_faq1, col_faq2 = st.columns(2)
+        
+        faq_questions = [
+            "Gimana cara konversi magang?",
+            "Berikan saya link perbaikan absen.",
+            "Gimana cara daftar sidang akhir?",
+            "Bagaimana cara daftar SUP?"
+        ]
+        
+        for i, question in enumerate(faq_questions):
+            # Mengatur kolom selang-seling
+            with col_faq1 if i % 2 == 0 else col_faq2:
+                if st.button(question, use_container_width=True):
+                    # Set trigger dan reload halaman agar diproses seperti input user
+                    st.session_state.prompt_trigger = question
+                    st.rerun()
+        st.write("") # Spacer
+
+    # --- Tampilkan Riwayat Chat ---
     for message in st.session_state.chat_history:
         if isinstance(message, HumanMessage):
             with st.chat_message("user"): 
@@ -188,8 +207,22 @@ def show_chatbot_page():
                         for source_file, public_url in message.metadata["sources"].items():
                             st.markdown(f"📄 [{source_file}]({public_url})")
 
-    # --- Logika Input & Streaming (DENGAN PENAMBAHAN LOGGING) ---
-    if user_question := st.chat_input("Ajukan pertanyaan disini..."):
+    # --- Logika Input Gabungan (Ketik Manual + Tombol FAQ) ---
+    
+    # 1. Cek apakah ada trigger dari tombol FAQ
+    triggered_question = st.session_state.get("prompt_trigger")
+    
+    # Reset trigger agar tidak looping
+    if triggered_question:
+        st.session_state.prompt_trigger = None 
+        
+    # 2. Cek input manual dari user
+    chat_input_value = st.chat_input("Ajukan pertanyaan disini...")
+
+    # 3. Tentukan pertanyaan final (Prioritas: Trigger > Input Manual)
+    user_question = triggered_question if triggered_question else chat_input_value
+
+    if user_question:
         if st.session_state.conversation_chain is None:
             st.error("Sesi chat tidak terinisialisasi. Coba muat ulang.")
         else:
