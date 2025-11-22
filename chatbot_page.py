@@ -26,7 +26,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
     genai.configure(api_key=google_api_key)
     llm = ChatGoogleGenerativeAI(
         model="gemini-3-pro-preview",
-        temperature=0.3,
+        temperature=0.1,
         convert_system_message_to_human=True,
         google_api_key=google_api_key
     )
@@ -36,7 +36,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
         search_type="similarity",
         search_kwargs={'k': 20}
     )
-    compressor = FlashrankRerank(top_n=5)
+    compressor = FlashrankRerank(top_n=10)
     compression_retriever = ContextualCompressionRetriever(
         base_compressor=compressor,
         base_retriever=base_retriever
