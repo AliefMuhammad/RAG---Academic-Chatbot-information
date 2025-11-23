@@ -15,3 +15,6 @@ unstructured[local-inference,pdf]
 flashrank 
 pydantic
 importlib-metadata<5.0.0
+openpyxl 
+rouge-score 
+bert-score
