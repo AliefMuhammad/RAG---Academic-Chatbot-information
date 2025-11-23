@@ -5,3 +5,7 @@ venv/
 __pycache__/
 *.ipynb_checkpoints
 .venv/
+
+Intrinsic-evaluation.xlsx
+
+~$*.xlsx
