@@ -1,0 +1,25 @@
+[theme]
+# --- WARNA UTAMA ---
+base = "light"
+primaryColor = "#FFB200"            
+backgroundColor = "#F7F9FC"          
+secondaryBackgroundColor = "#ffffffa4" 
+textColor = "#31333F"                
+
+# --- TIPOGRAFI ---
+font = "sans serif"
+
+# --- BENTUK TOMBOL & KOTAK ---
+# Mengatur tombol jadi agak bulat (pil) seperti di contoh gambar
+baseRadius = "1rem" 
+buttonRadius = "2rem"
+
+# --- PENGATURAN BORDER ---
+# Menyembunyikan border agar terlihat 'clean'
+borderColor = "#E0E0E0"
+showWidgetBorder = true
+
+[theme.sidebar]
+backgroundColor = "#FFFFFF"
+# Warna input di dalam sidebar (seperti search bar)
+secondaryBackgroundColor = "#F0F2F6"

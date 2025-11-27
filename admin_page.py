@@ -1,4 +1,4 @@
-# admin_page.py (Versi dengan Logging Detail untuk Debugging)
+# admin_page.py
 import streamlit as st
 import tempfile
 import os
@@ -335,9 +335,9 @@ def show_admin_page():
         st.markdown(f"### Admin Panel, {st.session_state['username']}!")
         st.write("---")
         st.markdown("""
-        <a href="#dashboard" style="text-decoration: none; color: inherit;"><div style="padding: 10px; border-radius: 5px; margin-bottom: 5px; background-color: #262730;">📊 Dashboard</div></a>
-        <a href="#manajemen-dokumen" style="text-decoration: none; color: inherit;"><div style="padding: 10px; border-radius: 5px; margin-bottom: 5px; background-color: #262730;">📄 Manajemen Dokumen</div></a>
-        <a href="#manajemen-pengguna" style="text-decoration: none; color: inherit;"><div style="padding: 10px; border-radius: 5px; margin-bottom: 5px; background-color: #262730;">👤 Manajemen Pengguna</div></a>
+        <a href="#dashboard" style="text-decoration: none; color: inherit;"><div style="padding: 10px; border-radius: 5px; margin-bottom: 5px; background-color: #262730;">Dashboard</div></a>
+        <a href="#manajemen-dokumen" style="text-decoration: none; color: inherit;"><div style="padding: 10px; border-radius: 5px; margin-bottom: 5px; background-color: #262730;"> Manajemen Dokumen</div></a>
+        <a href="#manajemen-pengguna" style="text-decoration: none; color: inherit;"><div style="padding: 10px; border-radius: 5px; margin-bottom: 5px; background-color: #262730;">Manajemen Pengguna</div></a>
         """, unsafe_allow_html=True)
         st.markdown("<div style='flex-grow: 1;'></div>", unsafe_allow_html=True)
         if st.button("Log Out", use_container_width=True):
