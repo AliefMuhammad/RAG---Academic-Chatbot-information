@@ -7,16 +7,16 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 import time 
 
-# --- [MODIFIKASI] Impor untuk LCEL (Streaming) ---
+# --- Impor untuk LCEL (Streaming) ---
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-# --- [MODIFIKASI] Impor untuk Re-ranking ---
+# ---  Impor untuk Re-ranking flaskrank---
 from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
 from langchain_community.document_compressors import FlashrankRerank
 
 
-# --- Fungsi Helper (Khusus Chatbot) ---
+# --- Fungsi Helper untuk chatbotnya ---
 @st.cache_resource
 def get_conversation_chain(_vectorstore, google_api_key):
     """
@@ -25,7 +25,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
     """
     genai.configure(api_key=google_api_key)
     llm = ChatGoogleGenerativeAI(
-        model="gemini-3-pro-preview",
+        model="gemini-2.5-flash",
         temperature=0.1,
         convert_system_message_to_human=True,
         google_api_key=google_api_key
@@ -108,7 +108,7 @@ def init_user_chat_session():
     if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []
 
-    # [FITUR BARU] Inisialisasi trigger pertanyaan cepat
+    # trigger pertanyaan cepat (FAQ)
     if 'prompt_trigger' not in st.session_state:
         st.session_state.prompt_trigger = None
     
@@ -170,8 +170,7 @@ def show_chatbot_page():
     st.markdown("<div style='text-align: center;'>Tanyakan informasi akademik di sini</div>", unsafe_allow_html=True)
     st.write("---")
 
-    # --- [FITUR BARU] Pertanyaan Cepat (FAQ Buttons) ---
-    # Ditampilkan hanya jika chat history masih kosong
+    # --- FAQ Buttons ---
     if not st.session_state.chat_history:
         st.caption("Pertanyaan yang sering ditanyakan (Klik untuk kirim):")
         col_faq1, col_faq2 = st.columns(2)
@@ -190,7 +189,7 @@ def show_chatbot_page():
                     # Set trigger dan reload halaman agar diproses seperti input user
                     st.session_state.prompt_trigger = question
                     st.rerun()
-        st.write("") # Spacer
+        st.write("")
 
     # --- Tampilkan Riwayat Chat ---
     for message in st.session_state.chat_history:
@@ -207,7 +206,7 @@ def show_chatbot_page():
                         for source_file, public_url in message.metadata["sources"].items():
                             st.markdown(f"📄 [{source_file}]({public_url})")
 
-    # --- Logika Input Gabungan (Ketik Manual + Tombol FAQ) ---
+    # --- Logika Input Gabungan dari Ketik Manual dan Tombol FAQ ---
     
     # 1. Cek apakah ada trigger dari tombol FAQ
     triggered_question = st.session_state.get("prompt_trigger")

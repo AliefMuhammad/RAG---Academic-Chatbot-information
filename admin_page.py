@@ -24,7 +24,7 @@ import altair as alt
 # Impor fungsi chat dari chatbot_page
 from chatbot_page import get_conversation_chain
 
-# --- [MODIFIKASI] Setup Logger ---
+# --- Setup Logger ---
 logging.basicConfig(
     level=logging.INFO, 
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -41,7 +41,7 @@ def hash_password(password):
     """Meng-hash password untuk disimpan"""
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
-# --- [FUNGSI DIPERBAIKI] Fungsi Akuisisi Data dengan LOGGING ---
+# --- Fungsi Akuisisi Data dengan LOGGING ---
 
 def process_and_store_document(pdf_file_object, file_content, file_name, classification, file_hash):
     """
@@ -160,7 +160,7 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
         return True, f"Sukses memproses {file_name}"
 
     except Exception as e:
-        # --- [MODIFIKASI] Logging Eror 
+        # --- Logging Eror 
         st.error(f"GAGAL TOTAL memproses '{file_name}'.")
 
         # akan mencetak eror LENGKAP ke terminal
@@ -452,16 +452,27 @@ def show_admin_page():
                 st.session_state.file_to_delete = None
                 st.rerun()
 
-    # --- Daftar Dokumen ---
+# --- Daftar Dokumen ---
     document_list = get_document_list(supabase) 
     if document_list:
         with st.container(height=400): 
             for meta in document_list:
                 doc_name = meta.get('source', 'Nama Tidak Ditemukan')
                 doc_class = meta.get('classification', 'Belum Terklasifikasi')
+                
+                # --- [MODIFIKASI] Ambil Link Public ---
+                # Menggunakan get_public_url sesuai request agar bisa dibuka di browser
+                try:
+                    file_url = supabase.storage.from_('pdf_documents').get_public_url(doc_name)
+                except Exception:
+                    file_url = "#" # Fallback jika gagal ambil link
+                
                 col1, col2 = st.columns([4, 1])
                 with col1:
-                    st.info(f"📄 **{doc_name}**\n\n*Klasifikasi: {doc_class}*")
+                    # Markdown Link: [Teks](URL)
+                    # Saat diklik, browser akan membuka PDF tersebut (preview)
+                    st.info(f"📄 [**{doc_name}**]({file_url})\n\n*Klasifikasi: {doc_class}*")
+                    
                 with col2:
                     is_modal_active = st.session_state.file_to_delete is not None
                     if st.button("🗑️", key=f"delete_{doc_name}", help=f"Hapus {doc_name}", use_container_width=True, disabled=is_modal_active):
@@ -469,8 +480,6 @@ def show_admin_page():
                         st.rerun()
     else:
         st.info("Belum ada dokumen di database.")
-
-    st.divider()
 
     # --- 3. Bagian Manajemen Pengguna ---
     st.markdown('<h2 id="manajemen-pengguna">👤 Manajemen Pengguna</h2>', unsafe_allow_html=True)
