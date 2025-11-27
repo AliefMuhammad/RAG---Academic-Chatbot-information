@@ -94,7 +94,7 @@ def show_login_page():
                 if not username or not password:
                     st.warning("Username dan Password tidak boleh kosong.")
                 else:
-                    with st.spinner("Mencoba login..."):
+                    with st.spinner("Sedang login..."):
                         try:
                             data, count = supabase.table('users').select('*').eq('username', username).execute()
                             
