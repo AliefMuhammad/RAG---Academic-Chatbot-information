@@ -179,8 +179,6 @@ def show_chatbot_page():
         .user-chat-bubble { background-color: #FFB200; color: #FFFFFF; padding: 10px 15px; border-radius: 15px 0px 15px 15px; max-width: 70%; text-align: right; box-shadow: 0px 2px 5px rgba(0,0,0,0.1); font-size: 1rem; }
         div[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] { background-color: #FFFFFF; padding: 15px; border-radius: 0px 15px 15px 15px; border: 1px solid #E0E0E0; box-shadow: 0px 2px 5px rgba(0,0,0,0.05); }
 
-        /* --- BAGIAN FOOTER YANG DIPERBAIKI --- */
-        
         .ai-footer {
             display: flex;
             flex-direction: column; /* Menyusun elemen secara vertikal (atas-bawah) */
@@ -189,7 +187,6 @@ def show_chatbot_page():
             border-top: 1px solid #F0F0F0;
         }
 
-        /* 1. WAKTU: Dipaksa ke KANAN */
         .ai-time {
             align-self: flex-end; /* Flex property agar dia minggir ke kanan */
             font-size: 0.75rem;
@@ -197,7 +194,6 @@ def show_chatbot_page():
             margin-bottom: 4px; /* Jarak antara waktu dan sumber */
         }
 
-        /* 2. SUMBER: Dipaksa ke KIRI & Lebar Penuh */
         details.ai-details {
             align-self: flex-start; /* Flex property agar dia minggir ke kiri */
             width: 100%; /* Agar kotak isi sumber bisa lebar */
