@@ -7,11 +7,11 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 import time 
 
-# --- Impor untuk LCEL (Streaming) ---
+# --- Import langchain ---
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-# ---  Impor untuk Re-ranking flaskrank---
+# ---  Import Re-ranking flaskrank---
 from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
 from langchain_community.document_compressors import FlashrankRerank
 
@@ -186,7 +186,6 @@ def show_chatbot_page():
             # Mengatur kolom selang-seling
             with col_faq1 if i % 2 == 0 else col_faq2:
                 if st.button(question, use_container_width=True):
-                    # Set trigger dan reload halaman agar diproses seperti input user
                     st.session_state.prompt_trigger = question
                     st.rerun()
         st.write("")

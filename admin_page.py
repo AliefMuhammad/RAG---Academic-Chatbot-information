@@ -460,17 +460,13 @@ def show_admin_page():
                 doc_name = meta.get('source', 'Nama Tidak Ditemukan')
                 doc_class = meta.get('classification', 'Belum Terklasifikasi')
                 
-                # --- [MODIFIKASI] Ambil Link Public ---
-                # Menggunakan get_public_url sesuai request agar bisa dibuka di browser
                 try:
                     file_url = supabase.storage.from_('pdf_documents').get_public_url(doc_name)
                 except Exception:
-                    file_url = "#" # Fallback jika gagal ambil link
+                    file_url = "#"
                 
                 col1, col2 = st.columns([4, 1])
                 with col1:
-                    # Markdown Link: [Teks](URL)
-                    # Saat diklik, browser akan membuka PDF tersebut (preview)
                     st.info(f"📄 [**{doc_name}**]({file_url})\n\n*Klasifikasi: {doc_class}*")
                     
                 with col2:
