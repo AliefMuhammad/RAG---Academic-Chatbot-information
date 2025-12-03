@@ -6,6 +6,7 @@ from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 import time 
+import os
 
 # --- Import langchain ---
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
@@ -14,6 +15,7 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 # ---  Import Re-ranking flaskrank---
 from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
 from langchain_community.document_compressors import FlashrankRerank
+from flashrank import Ranker
 
 
 # 1. HELPER FUNCTIONS (LOGIC)
@@ -37,7 +39,23 @@ def get_conversation_chain(_vectorstore, google_api_key):
         search_type="similarity",
         search_kwargs={'k': 20}
     )
-    compressor = FlashrankRerank(top_n=10)
+    # SETUP FLASH RERANK
+    # 1. Tentukan lokasi folder cache di dalam proyek
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    model_cache_path = os.path.join(current_dir, "model_cache")
+
+    # 2. Buat folder jika belum ada
+    if not os.path.exists(model_cache_path):
+        os.makedirs(model_cache_path)
+
+    # 3. Inisialisasi Ranker Manual
+    manual_ranker = Ranker(model_name="ms-marco-MultiBERT-L-12", cache_dir=model_cache_path)
+
+    # 4. Masukkan manual_ranker ke dalam FlashrankRerank sebagai 'client'
+    compressor = FlashrankRerank(client=manual_ranker, top_n=10)
+    
+    # ------------------------------------------
+
     compression_retriever = ContextualCompressionRetriever(
         base_compressor=compressor,
         base_retriever=base_retriever

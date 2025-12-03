@@ -7,7 +7,7 @@ import traceback
 import hashlib
 import uuid
 
-# --- Import Kunci ---
+# --- Import unstructured---
 from unstructured.partition.pdf import partition_pdf
 from unstructured.cleaners.core import clean_extra_whitespace, clean_non_ascii_chars
 
@@ -520,7 +520,7 @@ def show_admin_page():
 
     st.divider()
 
-    # --- 4. Expander Test Chatbot ---
+# --- 4. Expander Test Chatbot ---
     with st.expander("🤖 Test Chatbot (Admin)", expanded=False):
         chat_container = st.container(height=500)
         with chat_container:
@@ -534,11 +534,33 @@ def show_admin_page():
 
         user_question = st.chat_input("Ajukan pertanyaan disini...")
         if user_question:
+            # 1. Simpan input user ke history tampilan
             st.session_state.chat_history.append(HumanMessage(content=user_question))
             with st.chat_message("user"):
                 st.markdown(user_question)
+            
             with st.spinner("DIGICHATBOT (Admin) sedang memproses..."):
-                response = st.session_state.conversation_chain({'question': user_question})
-                ai_answer = response.get('answer', 'Error')
-                st.session_state.chat_history.append(AIMessage(content=ai_answer))
-                st.rerun()
+                try:
+                    chat_history_for_chain = st.session_state.chat_history[:-1]
+
+                    response = st.session_state.conversation_chain.invoke({
+                        "input": user_question,
+                        "chat_history": chat_history_for_chain
+                    })
+                    
+                    # Ambil jawaban dari key 'answer'
+                    ai_answer = response['answer']
+                    
+                    # Tampilkan dan simpan
+                    st.session_state.chat_history.append(AIMessage(content=ai_answer))
+                    with st.chat_message("assistant"):
+                        st.markdown(ai_answer)
+                        
+                        # Opsional: Tampilkan sumber di admin untuk debugging
+                        if "context" in response:
+                            with st.expander("Lihat Sumber (Debug Admin)"):
+                                for doc in response["context"]:
+                                    st.caption(f"File: {doc.metadata.get('source')} | Page: {doc.metadata.get('page_number')}")
+                                    
+                except Exception as e:
+                    st.error(f"Terjadi kesalahan pada chain: {e}")
