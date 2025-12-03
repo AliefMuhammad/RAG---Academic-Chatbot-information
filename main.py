@@ -7,6 +7,7 @@ import os
 # Impor halaman-halaman
 from login_page import show_login_page
 from chatbot_page import show_chatbot_page
+from admin_clear import show_admin_clean
 from admin_page import show_admin_page
 
 # --- 1. Konfigurasi Awal ---
@@ -52,7 +53,9 @@ def main_router():
         if st.session_state['username'] == 'admin':
             show_admin_page()
         else:
-            show_chatbot_page()
-
+            if st.session_state['username'] == 'admin1':
+                show_admin_clean()
+            else:
+                show_chatbot_page()
 if __name__ == "__main__":
     main_router()
