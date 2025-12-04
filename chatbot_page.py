@@ -40,21 +40,15 @@ def get_conversation_chain(_vectorstore, google_api_key):
         search_kwargs={'k': 20}
     )
     # SETUP FLASH RERANK
-    # 1. Tentukan lokasi folder cache di dalam proyek
     current_dir = os.path.dirname(os.path.abspath(__file__))
     model_cache_path = os.path.join(current_dir, "model_cache")
 
-    # 2. Buat folder jika belum ada
     if not os.path.exists(model_cache_path):
         os.makedirs(model_cache_path)
 
-    # 3. Inisialisasi Ranker Manual
     manual_ranker = Ranker(model_name="ms-marco-MultiBERT-L-12", cache_dir=model_cache_path)
-
-    # 4. Masukkan manual_ranker ke dalam FlashrankRerank sebagai 'client'
     compressor = FlashrankRerank(client=manual_ranker, top_n=10)
     
-    # ------------------------------------------
 
     compression_retriever = ContextualCompressionRetriever(
         base_compressor=compressor,
@@ -77,7 +71,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
         ("user", REPHRASE_PROMPT_TEMPLATE),
     ])
     
-    # BUAT HISTORY-AWARE RETRIEVER
+    # HISTORY-AWARE RETRIEVER
     history_aware_retriever = create_history_aware_retriever(
         llm=llm,
         retriever=compression_retriever,
@@ -158,23 +152,21 @@ def save_chat_log(username, question, answer, response_time):
     except Exception as e:
         print(f"[Error Log] Gagal menyimpan log: {e}")
 
-# 2. HELPER UI (HTML FORMATTER)
+# 2. UI (HTML FORMATTER)
 
 def format_ai_message(content, response_time=None, sources=None):
-    # 1. Siapkan HTML Waktu
+    # 1. HTML Waktu
     time_html = ""
     if response_time:
-        # Gunakan class ai-time
         time_html = f"""<div class="ai-time">⏱ {response_time:.2f}s</div>"""
 
-    # 2. Siapkan HTML Sumber
+    # 2. HTML Sumber
     sources_html = ""
     if sources:
         links = ""
         for filename, url in sources.items():
             links += f'<a href="{url}" target="_blank">📄 {filename}</a>'
         
-        # HTML Details
         sources_html = f"""<details class="ai-details"><summary>Lihat Sumber Dokumen ▾</summary><div class="ai-source-list">{links}</div></details>"""
     
     # 3. Gabungkan: WAKTU ditaruh SEBELUM SUMBER
@@ -289,12 +281,10 @@ def show_chatbot_page():
                     st.rerun()
         st.write("")
 
-    # ==========================================
     # DISPLAY HISTORY
-    # ==========================================
     for message in st.session_state.chat_history:
         if isinstance(message, HumanMessage):
-            # Tampilan USER: HTML Custom (Rata Kanan)
+            # Tampilan USER:
             st.markdown(f"""
                 <div class="user-chat-container">
                     <div class="user-chat-bubble">{message.content}</div>
@@ -304,11 +294,10 @@ def show_chatbot_page():
         elif isinstance(message, AIMessage):
             # Tampilan AI: st.chat_message (Rata Kiri)
             with st.chat_message("assistant"): 
-                # Ambil metadata
+
                 r_time = message.metadata.get("response_time", None)
                 srcs = message.metadata.get("sources", None)
                 
-                # Format ulang menjadi HTML tunggal agar footer menyatu
                 final_html = format_ai_message(message.content, r_time, srcs)
                 st.markdown(final_html, unsafe_allow_html=True)
 
@@ -326,8 +315,6 @@ def show_chatbot_page():
         else:
             # 1. Append User Msg & Tampilkan Langsung
             st.session_state.chat_history.append(HumanMessage(content=user_question))
-            
-            # Tampilkan bubble User (Rata Kanan)
             st.markdown(f"""
                 <div class="user-chat-container">
                     <div class="user-chat-bubble">{user_question}</div>
@@ -363,12 +350,8 @@ def show_chatbot_page():
                     # B. Proses Sumber Dokumen
                     ai_sources = {}
                     if source_documents:
-                    # Ambil metadata source secara unik
                         sources = {doc.metadata.get('source', None) for doc in source_documents}
-                        
-                        # Filter None jika ada metadata yang kosong
                         sources = {s for s in sources if s}
-
                         if sources:
                             try:
                                 supabase = st.session_state['supabase']
@@ -380,7 +363,7 @@ def show_chatbot_page():
                                 print(f"Gagal mengambil URL gambar: {e}")
                                 pass
 
-                    # C. Render Final (Gabungkan Jawaban + Footer dalam satu container)
+                    # C. Render Final
                     final_html_display = format_ai_message(full_response, response_time, ai_sources)
                     placeholder.markdown(final_html_display, unsafe_allow_html=True)
 

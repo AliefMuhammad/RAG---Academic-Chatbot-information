@@ -43,7 +43,6 @@ def get_vectors_and_metadata(_supabase_client):
                 # Mengurai string vektor menjadi list float yang valid
                 try:
                     # Supabase client mengembalikan vektor sebagai string (e.g., "[0.1, 0.2, ...]")
-                    # Ubah menjadi list float yang dikenali oleh Pandas/UMAP
                     vector_list = json.loads(item['embedding'])
                 except (json.JSONDecodeError, TypeError) as e:
                     st.warning(f"Melewatkan data karena gagal mengurai vektor: {e}")
