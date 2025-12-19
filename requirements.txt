@@ -21,3 +21,5 @@ pdfminer.six
 
 rouge-score
 bert-score
+
+bcrypt
