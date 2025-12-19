@@ -16,48 +16,20 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
 from langchain_community.document_compressors import FlashrankRerank
 from flashrank import Ranker
-from langchain_core.callbacks import BaseCallbackHandler
-
-# --- CLASS DEBUG LOGGING ---
-class PrintRetrievalHandler(BaseCallbackHandler):
-    """
-    Callback custom untuk print log dokumen yang di-retrieve ke Terminal VS Code.
-    Akan berjalan setiap kali retriever selesai mengambil dokumen.
-    """
-    def __init__(self):
-        self.step_count = 0
-
-    def on_retriever_end(self, documents, **kwargs):
-        self.step_count += 1
-        print(f"\n\n{('='*20)} [DEBUG RETRIEVER STEP {self.step_count}] {('='*20)}")
-        print(f"📊 Total Chunk Ditemukan: {len(documents)}")
-        
-        print(f"\n🔍 TOP 5 CHUNKS (Setelah Rerank):")
-        for i, doc in enumerate(documents[:10]): # Hanya ambil top 5 untuk di print
-            source = doc.metadata.get('source', 'Unknown File')
-            page = doc.metadata.get('page', '?')
-            # Bersihkan newline agar terminal rapi
-            preview = doc.page_content.replace('\n', ' ')[:200] 
-            
-            print(f"[{i+1}] 📄 {source} (Hal: {page})")
-            print(f"    📝 Isi: {preview}...")
-            print(f"    {'-'*40}")
-        print(f"{('='*60)}\n")
 
 # 1. HELPER FUNCTIONS
+
 def get_all_available_documents(supabase_client):
     """
     Mengambil daftar semua nama file dan klasifikasinya dari database.
     Ini berfungsi sebagai 'Daftar Isi' untuk chatbot.
     """
     try:
-        # Ambil file_name dan classification dari tabel parent_files
         response = supabase_client.table('parent_files').select('file_name, classification').execute()
         
         if not response.data:
             return "Belum ada dokumen yang tersedia."
             
-        # Format menjadi string list yang rapi
         doc_list = []
         for item in response.data:
             clean_name = item['file_name'].replace('.pdf', '').replace('_', ' ')
@@ -75,7 +47,6 @@ def get_conversation_chain(_vectorstore, google_api_key, _supabase_client):
     
     genai.configure(api_key=google_api_key)
     
-    # Gunakan temperature sedikit lebih tinggi (0.3) agar kreatif saat rephrasing query
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         temperature=0.3,
@@ -83,15 +54,13 @@ def get_conversation_chain(_vectorstore, google_api_key, _supabase_client):
         google_api_key=google_api_key
     )
     
-    # 2. OPTIMALISASI RETRIEVER (PERBAIKAN UTAMA)
-    # Masalah sebelumnya: Dokumen relevan (beasiswa) tertimbun dokumen admin di ranking awal.
-    # Solusi: Perbesar fetch_k agar pencarian awal Supabase lebih luas sebelum difilter MMR.
+    # 2. OPTIMALISASI RETRIEVER
     base_retriever = _vectorstore.as_retriever(
         search_type="mmr",
         search_kwargs={
-            'k': 50,           # Kirim 50 kandidat ke Reranker (Flashrank)
-            'fetch_k': 100,    # Cari 300 dokumen teratas di DB (agar yang relevan tidak hilang)
-            'lambda_mult': 0.7 # Balance antara relevansi dan keberagaman
+            'k': 50,           
+            'fetch_k': 100,    
+            'lambda_mult': 0.7 
         }
     )
 
@@ -103,7 +72,6 @@ def get_conversation_chain(_vectorstore, google_api_key, _supabase_client):
 
     manual_ranker = Ranker(model_name="ms-marco-MultiBERT-L-12", cache_dir=model_cache_path)
     
-    # Ambil top 20 hasil terbaik setelah reranking untuk dikirim ke LLM
     compressor = FlashrankRerank(client=manual_ranker, top_n=20)
     
     compression_retriever = ContextualCompressionRetriever(
@@ -112,8 +80,6 @@ def get_conversation_chain(_vectorstore, google_api_key, _supabase_client):
     )
 
     # 3. REPHRASE PROMPT (QUERY EXPANSION)
-    # Prompt ini memaksa LLM melihat daftar dokumen yang tersedia.
-    
     REPHRASE_PROMPT_TEMPLATE = """
     You are an intelligent query optimizer for an academic retrieval system.
     
@@ -145,7 +111,6 @@ def get_conversation_chain(_vectorstore, google_api_key, _supabase_client):
     )
 
     # 4. SYSTEM PROMPT (QA CHAIN)
-    # Hapus 'f' string untuk menghindari konflik variabel {context}
     SYSTEM_PROMPT_TEMPLATE = """
     Anda adalah "DigiChatbot", asisten AI akademik Prodi Bisnis Digital Universitas Padjadjaran.
     
@@ -402,14 +367,13 @@ def show_chatbot_page():
 
                 try:
                     chat_history_for_chain = st.session_state.chat_history[:-1]
-                    debug_handler = PrintRetrievalHandler()
                     
+                    # STREAMING TANPA CALLBACK DEBUG
                     stream = st.session_state.conversation_chain.stream(
                         {
                         "input": user_question,
                         "chat_history": chat_history_for_chain
-                        },
-                        config={'callbacks': [debug_handler]}
+                        }
                     )
 
                     # A. Streaming Text
