@@ -3,7 +3,7 @@ import streamlit as st
 import tempfile
 import os
 import logging
-import traceback 
+import traceback
 import hashlib
 import uuid
 
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 logging.getLogger("pdfminer").setLevel(logging.ERROR)
 
-# --- Fungsi Akuisisi Data dengan LOGGING (TETAP) ---
+# --- Fungsi Akuisisi Data ---
 
 def process_and_store_document(pdf_file_object, file_content, file_name, classification, file_hash):
     """
@@ -39,7 +39,7 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
     logger.info(f"[START] Memulai proses untuk file: {file_name} (ID: {parent_id})")
 
     try:
-        # --- Langkah 1: Parsing PDF dengan Unstructured ---
+        # --- Parsing PDF dengan Unstructured ---
         st.write(f"Langkah 1/4: Memulai 'unstructured' parsing untuk {file_name}...")
         logger.info(f"[Langkah 1] Memulai partition_pdf (strategy=hi_res) untuk {file_name}")
         
@@ -50,17 +50,17 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
             languages=["ind", "eng"], 
             extract_images_in_pdf=False,
             
-            # --- new chunking metodh (smart chunk)---
             chunking_strategy="by_title",
-            max_characters=4000,
+            max_characters=4000,  
             combine_text_under_n_chars=2000,
-            new_after_n_chars=3800,
+            new_after_n_chars=3800,        
+            overlap=200                    
         )
         
         st.write(f"Parsing selesai. Ditemukan {len(elements)} CHUNKS logis.")
         logger.info(f"partition_pdf selesai. Menemukan {len(elements)} elemen.")
 
-        # --- Langkah 2: Buat Dokumen LangChain dari Elemen/Chunks ---
+        # --- Buat Dokumen LangChain dari Elemen/Chunks ---
         st.write("Langkah 2/4: Membersihkan teks dan membuat Dokumen LangChain...")
         logger.info(f"[Langkah 2] Memulai pembersihan dan pembuatan Dokumen LangChain...")
         documents = []
@@ -96,9 +96,9 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
         st.write(f"Selesai membuat {len(documents)} dokumen. Memulai penyimpanan...")
         logger.info(f"Selesai membuat {len(documents)} dokumen.")
 
-        # --- Langkah 3: Simpan ke Database (Atomik) ---
+        # --- Simpan ke Database (Atomik) ---
         
-        # 3a. Buat entri di tabel file induk (parent_files)
+        # Entri di tabel file parent_files
         st.write("Langkah 3/4: Menyimpan data ke Database...")
         logger.info(f"[Langkah 3a] Menyimpan record ke tabel 'parent_files'...")
         supabase.table('parent_files').insert({
@@ -109,7 +109,7 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
         }).execute()
         logger.info("Sukses menyimpan ke 'parent_files'.")
         
-        # 3b. Unggah file PDF asli ke Supabase Storage
+        # Upload file PDF asli ke Supabase Storage
         logger.info(f"[Langkah 3b] Mengunggah file '{file_name}' ke Supabase Storage...")
         try:
             supabase.storage.from_('pdf_documents').upload(
@@ -123,7 +123,7 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
                 raise storage_error 
             logger.warning(f"File {file_name} sudah ada di Storage. Melanjutkan...")
 
-        # 3c. Simpan text chunks dan embeddings ke Database (tabel documents)
+        # Simpan text chunks dan embeddings ke Database tabel documents
         st.write("Langkah 4/4: Membuat embedding dan menyimpannya ke Vector Store...")
         logger.info(f"[Langkah 3c] Mengkonfigurasi GoogleGenerativeAIEmbeddings...")
         genai.configure(api_key=google_api_key)
@@ -231,17 +231,15 @@ def delete_document_from_supabase(filename):
         return False, f"Gagal menghapus dokumen: {e}"
 
 
-# --- Tampilan Utama Halaman Admin (CLEAN VERSION) ---
+# --- Tampilan Utama Halaman Admin ---
 def show_admin_clean():
     """Menampilkan halaman admin hanya untuk manajemen dokumen (Upload & List/Hapus)."""
     
-    # Inisialisasi variabel state untuk hapus file
     if 'file_to_delete' not in st.session_state:
         st.session_state.file_to_delete = None
         
     supabase = st.session_state['supabase']
 
-    # --- Sidebar Navigasi Sederhana ---
     with st.sidebar:
         st.markdown(f"### Admin Panel, {st.session_state['username']}!")
         st.write("---")
@@ -253,12 +251,10 @@ def show_admin_clean():
             st.session_state.file_to_delete = None
             st.rerun()
 
-    # --- Judul Utama ---
     st.markdown("<h1 style='text-align: center;'>DIGICHATBOT (ADMIN)</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center;'>Panel Manajemen Dokumen Pengetahuan</p>", unsafe_allow_html=True)
     st.write("---")
     
-    # --- 1. Bagian Upload Dokumen ---
     st.markdown('<h2>⬆️ Unggah Dokumen Baru</h2>', unsafe_allow_html=True)
     
     classification_options = ["Pilih Klasifikasi...", "Dok. Universitas", "Dok. Fakultas", "Dok. Prodi"]
@@ -321,10 +317,8 @@ def show_admin_clean():
     
     st.divider()
 
-    # --- 2. Bagian List & Hapus Dokumen ---
     st.markdown('<h2>📂 Database Dokumen Saat Ini</h2>', unsafe_allow_html=True)
 
-    # --- Bagian Konfirmasi Hapus (Modal-like) ---
     if st.session_state.file_to_delete:
         with st.container():
             file_name = st.session_state.file_to_delete
@@ -341,10 +335,8 @@ def show_admin_clean():
                 st.session_state.file_to_delete = None
                 st.rerun()
 
-    # --- Render Daftar Dokumen ---
     document_list = get_document_list(supabase) 
     if document_list:
-        # Menggunakan container dengan scroll jika dokumen banyak
         with st.container(height=500): 
             for meta in document_list:
                 doc_name = meta.get('source', 'Nama Tidak Ditemukan')
@@ -361,7 +353,6 @@ def show_admin_clean():
                     
                 with col2:
                     is_modal_active = st.session_state.file_to_delete is not None
-                    # Tombol Hapus
                     if st.button("🗑️", key=f"delete_{doc_name}", help=f"Hapus {doc_name}", use_container_width=True, disabled=is_modal_active):
                         st.session_state.file_to_delete = doc_name
                         st.rerun()

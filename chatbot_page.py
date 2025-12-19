@@ -16,92 +16,164 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
 from langchain_community.document_compressors import FlashrankRerank
 from flashrank import Ranker
+from langchain_core.callbacks import BaseCallbackHandler
 
+# --- CLASS DEBUG LOGGING ---
+class PrintRetrievalHandler(BaseCallbackHandler):
+    """
+    Callback custom untuk print log dokumen yang di-retrieve ke Terminal VS Code.
+    Akan berjalan setiap kali retriever selesai mengambil dokumen.
+    """
+    def __init__(self):
+        self.step_count = 0
 
-# 1. HELPER FUNCTIONS (LOGIC)
+    def on_retriever_end(self, documents, **kwargs):
+        self.step_count += 1
+        print(f"\n\n{('='*20)} [DEBUG RETRIEVER STEP {self.step_count}] {('='*20)}")
+        print(f"📊 Total Chunk Ditemukan: {len(documents)}")
+        
+        print(f"\n🔍 TOP 5 CHUNKS (Setelah Rerank):")
+        for i, doc in enumerate(documents[:10]): # Hanya ambil top 5 untuk di print
+            source = doc.metadata.get('source', 'Unknown File')
+            page = doc.metadata.get('page', '?')
+            # Bersihkan newline agar terminal rapi
+            preview = doc.page_content.replace('\n', ' ')[:200] 
+            
+            print(f"[{i+1}] 📄 {source} (Hal: {page})")
+            print(f"    📝 Isi: {preview}...")
+            print(f"    {'-'*40}")
+        print(f"{('='*60)}\n")
+
+# 1. HELPER FUNCTIONS
+def get_all_available_documents(supabase_client):
+    """
+    Mengambil daftar semua nama file dan klasifikasinya dari database.
+    Ini berfungsi sebagai 'Daftar Isi' untuk chatbot.
+    """
+    try:
+        # Ambil file_name dan classification dari tabel parent_files
+        response = supabase_client.table('parent_files').select('file_name, classification').execute()
+        
+        if not response.data:
+            return "Belum ada dokumen yang tersedia."
+            
+        # Format menjadi string list yang rapi
+        doc_list = []
+        for item in response.data:
+            clean_name = item['file_name'].replace('.pdf', '').replace('_', ' ')
+            doc_list.append(f"- {clean_name} (Kategori: {item['classification']})")
+            
+        return "\n".join(doc_list)
+    except Exception as e:
+        return f"Gagal memuat daftar dokumen: {e}"
 
 @st.cache_resource
-def get_conversation_chain(_vectorstore, google_api_key):
-    """
-    Membuat chain percakapan RAG yang STATELESS, STREAMABLE,
-    dan menggunakan RE-RANKING.
-    """
+def get_conversation_chain(_vectorstore, google_api_key, _supabase_client): 
+    
+    # 1. Ambil list Dokumen untuk Konteks Global
+    available_docs_text = get_all_available_documents(_supabase_client)
+    
     genai.configure(api_key=google_api_key)
+    
+    # Gunakan temperature sedikit lebih tinggi (0.3) agar kreatif saat rephrasing query
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
-        temperature=0.1,
+        temperature=0.3,
         convert_system_message_to_human=True,
         google_api_key=google_api_key
     )
     
-    # SETUP RETRIEVER
+    # 2. OPTIMALISASI RETRIEVER (PERBAIKAN UTAMA)
+    # Masalah sebelumnya: Dokumen relevan (beasiswa) tertimbun dokumen admin di ranking awal.
+    # Solusi: Perbesar fetch_k agar pencarian awal Supabase lebih luas sebelum difilter MMR.
     base_retriever = _vectorstore.as_retriever(
-        search_type="similarity",
-        search_kwargs={'k': 20}
+        search_type="mmr",
+        search_kwargs={
+            'k': 50,           # Kirim 50 kandidat ke Reranker (Flashrank)
+            'fetch_k': 100,    # Cari 300 dokumen teratas di DB (agar yang relevan tidak hilang)
+            'lambda_mult': 0.7 # Balance antara relevansi dan keberagaman
+        }
     )
-    # SETUP FLASH RERANK
+
+    # Setup Flashrank
     current_dir = os.path.dirname(os.path.abspath(__file__))
     model_cache_path = os.path.join(current_dir, "model_cache")
-
     if not os.path.exists(model_cache_path):
         os.makedirs(model_cache_path)
 
     manual_ranker = Ranker(model_name="ms-marco-MultiBERT-L-12", cache_dir=model_cache_path)
-    compressor = FlashrankRerank(client=manual_ranker, top_n=10)
     
-
+    # Ambil top 20 hasil terbaik setelah reranking untuk dikirim ke LLM
+    compressor = FlashrankRerank(client=manual_ranker, top_n=20)
+    
     compression_retriever = ContextualCompressionRetriever(
         base_compressor=compressor,
         base_retriever=base_retriever
     )
 
-    # PROMPT UNTUK REPHRASE PERTANYAAN
+    # 3. REPHRASE PROMPT (QUERY EXPANSION)
+    # Prompt ini memaksa LLM melihat daftar dokumen yang tersedia.
+    
     REPHRASE_PROMPT_TEMPLATE = """
-    Given the following conversation and a follow up question, rephrase the 
-    follow up question to be a standalone question, in its original language.
+    You are an intelligent query optimizer for an academic retrieval system.
+    
+    CONTEXT (AVAILABLE DOCUMENTS IN DATABASE):
+    {doc_list}
 
-    Chat History:
-    {chat_history}
+    TASK:
+    Given the chat history and the latest user input, rephrase the follow up question 
+    to be a STANDALONE question that is optimized for vector retrieval.
+    
+    RULES:
+    1. If the user asks a BROAD question, you MUST explicitly include the NAMES of the relevant documents found in the 'CONTEXT' list above into the standalone question.
+    2. Keep the language Indonesian.
 
+    Chat History: {chat_history}
     Follow Up Input: {input}
     Standalone question:"""
     
+    # Inject doc_list menggunakan .partial()
     rephrase_prompt = ChatPromptTemplate.from_messages([
         MessagesPlaceholder(variable_name="chat_history"),
         ("user", REPHRASE_PROMPT_TEMPLATE),
-    ])
+    ]).partial(doc_list=available_docs_text)
     
-    # HISTORY-AWARE RETRIEVER
     history_aware_retriever = create_history_aware_retriever(
         llm=llm,
         retriever=compression_retriever,
         prompt=rephrase_prompt
     )
 
-    # PROMPT JAWABAN AKHIR
-    SYSTEM_PROMPT = """
-    Anda adalah asisten AI akademik yang sopan dan profesional. Jawab pertanyaan pengguna secara langsung dan tetap sopan dan ramah, HANYA berdasarkan konteks yang diberikan di bawah ini.
-    JANGAN pernah memulai jawaban Anda dengan frasa seperti Berdasarkan konteks/dokumen yang diberikan... dan lainnya.
-
-    Konteks:
+    # 4. SYSTEM PROMPT (QA CHAIN)
+    # Hapus 'f' string untuk menghindari konflik variabel {context}
+    SYSTEM_PROMPT_TEMPLATE = """
+    Anda adalah "DigiChatbot", asisten AI akademik Prodi Bisnis Digital Universitas Padjadjaran.
+    
+    INFORMASI GLOBAL (DAFTAR DOKUMEN YANG TERSEDIA DI DATABASE):
+    Berikut adalah daftar file yang dimiliki sistem saat ini. Gunakan daftar ini untuk mengetahui konteks apa saja yang tersedia, meskipun detail isinya belum tentu muncul di hasil pencarian.
+    {doc_list}
+    
+    KONTEKS PENCARIAN (DETAIL ISI DOKUMEN DARI DATABASE):
     {context}
 
-    Aturan Jawaban:
-    1. jika jika ada jawaban di dalam konteks yang mendekati pertanyaan berikan saja jawaban yang ada di konteks dengan bilang "pada dokumen ini hanya di sebutkan..." jadi saya tidak menemukan informasi ....
-    2. Jika jawaban ditemukan di dalam konteks, berikan jawaban tersebut secara jelas dan sopan serta ramah.
-    3. Setelah memberikan jawaban (jika ditemukan), SELALU tambahkan kalimat di baris baru: "Apakah ada yang bisa saya bantu lagi?"
-    4. Jika informasi tidak ada di dalam konteks atau Anda tidak tahu, jawab bahwa anda tidak tahu konteks tersebut dan bilang bahwa anda bisa tanyakan langsung ke Sekretaris Prodi."
-    5. Jangan mengarang jawaban di luar konteks.
-    6. jika memungkinkan menjawab dengan list buatkan dengan list, pokoknya gimana caranya jawaban rapih dan dapat dibaca user dengan mudah 
-
-    Jawaban (langsung, sopan, dan ikuti aturan):
+    ATURAN MENJAWAB:
+    1. Jangan menjawab "berdasarkan informasi yang diberikan" tapi menjawablah dengan natural seolah-olah anda mengetahuinya.
+    2. PRIORITAS: Jika user bertanya "Ada apa saja?" atau "List dokumen", WAJIB melihat bagian "INFORMASI GLOBAL" di atas.
+    3. Jika detail lengkap (seperti syarat/tanggal) dari salah satu dokumen tidak ditemukan di bagian "KONTEKS PENCARIAN", katakan jujur: "Saya melihat ada dokumen [Nama Dokumen] di sistem, namun detail isinya tidak terambil saat ini. Coba tanyakan lagi spesifik tentang [Nama Dokumen] tersebut."
+    4. Jangan mengarang syarat/tanggal jika tidak ada di teks.
+    5. Jawab dengan LIST (Bullet points) agar mudah dibaca.
+    
+    Jawaban:
     """
     
     qa_prompt = ChatPromptTemplate.from_messages([
-        ("system", SYSTEM_PROMPT),
+        ("system", SYSTEM_PROMPT_TEMPLATE),
         MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}") 
     ])
+    
+    # Inject doc_list ke system prompt juga
+    qa_prompt = qa_prompt.partial(doc_list=available_docs_text)
 
     question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
 
@@ -111,6 +183,7 @@ def get_conversation_chain(_vectorstore, google_api_key):
     )
     
     return rag_chain
+
 
 def init_user_chat_session():
     """Inisialisasi session state."""
@@ -136,7 +209,7 @@ def init_user_chat_session():
             table_name="documents",
             query_name="match_documents"
         )
-        st.session_state.conversation_chain = get_conversation_chain(vector_store, google_api_key)
+        st.session_state.conversation_chain = get_conversation_chain(vector_store, google_api_key, supabase)
 
 def save_chat_log(username, question, answer, response_time):
     """Mengirim log ke Supabase."""
@@ -169,7 +242,7 @@ def format_ai_message(content, response_time=None, sources=None):
         
         sources_html = f"""<details class="ai-details"><summary>Lihat Sumber Dokumen ▾</summary><div class="ai-source-list">{links}</div></details>"""
     
-    # 3. Gabungkan: WAKTU ditaruh SEBELUM SUMBER
+    # 3. WAKTU ditaruh SEBELUM SUMBER
     footer_html = ""
     if time_html or sources_html:
         footer_html = f"""<div class="ai-footer">{time_html}{sources_html}</div>"""
@@ -184,29 +257,29 @@ def show_chatbot_page():
     # --- CSS STYLING ---
     st.markdown("""
         <style>
-        /* CSS User Chat & AI Bubble Container (Biarkan kode lama Anda utk ini) */
+        /* CSS User Chat & AI Bubble Container */
         .user-chat-container { display: flex; justify-content: flex-end; margin-bottom: 10px; }
         .user-chat-bubble { background-color: #FFB200; color: #FFFFFF; padding: 10px 15px; border-radius: 15px 0px 15px 15px; max-width: 70%; text-align: right; box-shadow: 0px 2px 5px rgba(0,0,0,0.1); font-size: 1rem; }
         div[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] { background-color: #FFFFFF; padding: 15px; border-radius: 0px 15px 15px 15px; border: 1px solid #E0E0E0; box-shadow: 0px 2px 5px rgba(0,0,0,0.05); }
 
         .ai-footer {
             display: flex;
-            flex-direction: column; /* Menyusun elemen secara vertikal (atas-bawah) */
+            flex-direction: column; 
             margin-top: 10px;
             padding-top: 5px;
             border-top: 1px solid #F0F0F0;
         }
 
         .ai-time {
-            align-self: flex-end; /* Flex property agar dia minggir ke kanan */
+            align-self: flex-end; 
             font-size: 0.75rem;
             color: #888;
-            margin-bottom: 4px; /* Jarak antara waktu dan sumber */
+            margin-bottom: 4px; 
         }
 
         details.ai-details {
-            align-self: flex-start; /* Flex property agar dia minggir ke kiri */
-            width: 100%; /* Agar kotak isi sumber bisa lebar */
+            align-self: flex-start;
+            width: 100%;
             text-align: left;
         }
 
@@ -269,7 +342,7 @@ def show_chatbot_page():
             "Berapa SKS minimal untuk lulus?",
             "Gimana cara daftar sidang akhir?",
             "Gimana cara daftar SUP?",
-            "Kapan saya bisa mulai skripsi?",
+            "Beasiswa apa saja yang sedang tersedia?",
             "Magang dapat diambil pada semester berapa?",
             "Apa saja syarat daftar wisuda?",
             "Berikan link data prodi"
@@ -284,7 +357,7 @@ def show_chatbot_page():
     # DISPLAY HISTORY
     for message in st.session_state.chat_history:
         if isinstance(message, HumanMessage):
-            # Tampilan USER:
+            # Tampilan USER
             st.markdown(f"""
                 <div class="user-chat-container">
                     <div class="user-chat-bubble">{message.content}</div>
@@ -292,12 +365,10 @@ def show_chatbot_page():
             """, unsafe_allow_html=True)
             
         elif isinstance(message, AIMessage):
-            # Tampilan AI: st.chat_message (Rata Kiri)
+            # Tampilan AI
             with st.chat_message("assistant"): 
-
                 r_time = message.metadata.get("response_time", None)
                 srcs = message.metadata.get("sources", None)
-                
                 final_html = format_ai_message(message.content, r_time, srcs)
                 st.markdown(final_html, unsafe_allow_html=True)
 
@@ -313,7 +384,7 @@ def show_chatbot_page():
         if st.session_state.conversation_chain is None:
             st.error("Sesi chat tidak terinisialisasi. Coba muat ulang.")
         else:
-            # 1. Append User Msg & Tampilkan Langsung
+            # 1. Append User Msg & Tampilkan
             st.session_state.chat_history.append(HumanMessage(content=user_question))
             st.markdown(f"""
                 <div class="user-chat-container">
@@ -331,10 +402,15 @@ def show_chatbot_page():
 
                 try:
                     chat_history_for_chain = st.session_state.chat_history[:-1]
-                    stream = st.session_state.conversation_chain.stream({
+                    debug_handler = PrintRetrievalHandler()
+                    
+                    stream = st.session_state.conversation_chain.stream(
+                        {
                         "input": user_question,
                         "chat_history": chat_history_for_chain
-                    })
+                        },
+                        config={'callbacks': [debug_handler]}
+                    )
 
                     # A. Streaming Text
                     for chunk in stream:
@@ -369,7 +445,7 @@ def show_chatbot_page():
 
                 except Exception as e:
                     st.error(f"Terjadi kesalahan: {e}")
-                    full_response = "Maaf, saya mengalami gangguan. Silakan coba lagi."
+                    full_response = "Maaf, saya mengalami gangguan saat memproses data."
                     placeholder.markdown(full_response)
                     response_time = 0.0
                     ai_sources = {}

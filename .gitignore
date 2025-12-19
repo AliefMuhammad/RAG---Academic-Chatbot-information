@@ -15,3 +15,7 @@ Result-Intrinsic-evaluation.xlsx
 ~$*.xlsx
 
 model_cache/
+
+learing_embedding.py
+
+figures/

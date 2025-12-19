@@ -63,7 +63,7 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
             strategy="hi_res", 
             infer_table_structure=True,
             languages=["ind", "eng"], 
-            extract_images_in_pdf=False,
+            extract_images_in_pdf=True,
             
             # --- new chunking metodh (smart chunk)---
             chunking_strategy="by_title",
@@ -319,7 +319,7 @@ def init_admin_chat_session():
             table_name="documents",
             query_name="match_documents"
         )
-        st.session_state.conversation_chain = get_conversation_chain(vector_store, google_api_key)
+        st.session_state.conversation_chain = get_conversation_chain(vector_store, google_api_key, supabase)
     if 'file_to_delete' not in st.session_state:
         st.session_state.file_to_delete = None
 
@@ -334,11 +334,6 @@ def show_admin_page():
     with st.sidebar:
         st.markdown(f"### Admin Panel, {st.session_state['username']}!")
         st.write("---")
-        st.markdown("""
-        <a href="#dashboard" style="text-decoration: none; color: inherit;"><div style="padding: 10px; border-radius: 5px; margin-bottom: 5px; background-color: #262730;">Dashboard</div></a>
-        <a href="#manajemen-dokumen" style="text-decoration: none; color: inherit;"><div style="padding: 10px; border-radius: 5px; margin-bottom: 5px; background-color: #262730;"> Manajemen Dokumen</div></a>
-        <a href="#manajemen-pengguna" style="text-decoration: none; color: inherit;"><div style="padding: 10px; border-radius: 5px; margin-bottom: 5px; background-color: #262730;">Manajemen Pengguna</div></a>
-        """, unsafe_allow_html=True)
         st.markdown("<div style='flex-grow: 1;'></div>", unsafe_allow_html=True)
         if st.button("Log Out", use_container_width=True):
             st.session_state.logged_in = False
