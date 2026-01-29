@@ -1,7 +1,5 @@
 # admin_page.py
 import streamlit as st
-import tempfile
-import os
 import logging
 import traceback
 import hashlib
@@ -29,9 +27,6 @@ logging.getLogger("pdfminer").setLevel(logging.ERROR)
 # --- Fungsi Akuisisi Data ---
 
 def process_and_store_document(pdf_file_object, file_content, file_name, classification, file_hash):
-    """
-    Fungsi master untuk memproses satu PDF dengan logging langkah-demi-langkah.
-    """
     supabase = st.session_state['supabase']
     google_api_key = st.session_state['google_api_key']
     parent_id = str(uuid.uuid4())
@@ -170,11 +165,10 @@ def process_and_store_document(pdf_file_object, file_content, file_name, classif
         return False, str(e)
 
 
-# --- connect to db Supabase ---
+# --- koneksi to db Supabase ---
 
 @st.cache_data(ttl=60)
 def get_existing_file_hashes(_supabase):
-    """[BARU] Mengambil semua hash file yang sudah ada dari tabel parent_files."""
     logger.info("Mengambil cache hash file...")
     try:
         response = _supabase.table('parent_files').select('file_hash').execute()

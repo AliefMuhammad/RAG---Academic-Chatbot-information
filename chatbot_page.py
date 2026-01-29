@@ -20,10 +20,6 @@ from flashrank import Ranker
 # 1. HELPER FUNCTIONS
 
 def get_all_available_documents(supabase_client):
-    """
-    Mengambil daftar semua nama file dan klasifikasinya dari database.
-    Ini berfungsi sebagai 'Daftar Isi' untuk chatbot.
-    """
     try:
         response = supabase_client.table('parent_files').select('file_name, classification').execute()
         
@@ -42,19 +38,19 @@ def get_all_available_documents(supabase_client):
 @st.cache_resource
 def get_conversation_chain(_vectorstore, google_api_key, _supabase_client): 
     
-    # 1. Ambil list Dokumen untuk Konteks Global
+    # Ambil list Dokumen untuk Konteks Global
     available_docs_text = get_all_available_documents(_supabase_client)
     
     genai.configure(api_key=google_api_key)
     
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
+        model="gemini-2.5-pro",
         temperature=0.3,
         convert_system_message_to_human=True,
         google_api_key=google_api_key
     )
     
-    # 2. OPTIMALISASI RETRIEVER
+    # RETRIEVER
     base_retriever = _vectorstore.as_retriever(
         search_type="mmr",
         search_kwargs={
@@ -79,7 +75,7 @@ def get_conversation_chain(_vectorstore, google_api_key, _supabase_client):
         base_retriever=base_retriever
     )
 
-    # 3. REPHRASE PROMPT (QUERY EXPANSION)
+    # REPHRASE PROMPT (QUERY EXPANSION)
     REPHRASE_PROMPT_TEMPLATE = """
     You are an intelligent query optimizer for an academic retrieval system.
     
@@ -98,7 +94,7 @@ def get_conversation_chain(_vectorstore, google_api_key, _supabase_client):
     Follow Up Input: {input}
     Standalone question:"""
     
-    # Inject doc_list menggunakan .partial()
+    # Inject doc_list menggunakan
     rephrase_prompt = ChatPromptTemplate.from_messages([
         MessagesPlaceholder(variable_name="chat_history"),
         ("user", REPHRASE_PROMPT_TEMPLATE),
@@ -110,7 +106,7 @@ def get_conversation_chain(_vectorstore, google_api_key, _supabase_client):
         prompt=rephrase_prompt
     )
 
-    # 4. SYSTEM PROMPT (QA CHAIN)
+    # SYSTEM PROMPT (QA CHAIN)
     SYSTEM_PROMPT_TEMPLATE = """
     Anda adalah "DigiChatbot", asisten AI akademik Prodi Bisnis Digital Universitas Padjadjaran.
     
@@ -137,7 +133,7 @@ def get_conversation_chain(_vectorstore, google_api_key, _supabase_client):
         ("human", "{input}") 
     ])
     
-    # Inject doc_list ke system prompt juga
+    # Inject doc_list ke system prompt
     qa_prompt = qa_prompt.partial(doc_list=available_docs_text)
 
     question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
@@ -190,15 +186,15 @@ def save_chat_log(username, question, answer, response_time):
     except Exception as e:
         print(f"[Error Log] Gagal menyimpan log: {e}")
 
-# 2. UI (HTML FORMATTER)
+# UI
 
 def format_ai_message(content, response_time=None, sources=None):
-    # 1. HTML Waktu
+    # HTML Waktu
     time_html = ""
     if response_time:
         time_html = f"""<div class="ai-time">⏱ {response_time:.2f}s</div>"""
 
-    # 2. HTML Sumber
+    # HTML Sumber
     sources_html = ""
     if sources:
         links = ""
@@ -207,7 +203,7 @@ def format_ai_message(content, response_time=None, sources=None):
         
         sources_html = f"""<details class="ai-details"><summary>Lihat Sumber Dokumen ▾</summary><div class="ai-source-list">{links}</div></details>"""
     
-    # 3. WAKTU ditaruh SEBELUM SUMBER
+    # footer konsol
     footer_html = ""
     if time_html or sources_html:
         footer_html = f"""<div class="ai-footer">{time_html}{sources_html}</div>"""
@@ -349,7 +345,7 @@ def show_chatbot_page():
         if st.session_state.conversation_chain is None:
             st.error("Sesi chat tidak terinisialisasi. Coba muat ulang.")
         else:
-            # 1. Append User Msg & Tampilkan
+            # Append User Msg & Tampilkan
             st.session_state.chat_history.append(HumanMessage(content=user_question))
             st.markdown(f"""
                 <div class="user-chat-container">
@@ -357,7 +353,7 @@ def show_chatbot_page():
                 </div>
             """, unsafe_allow_html=True)
             
-            # 2. Proses AI Response
+            # Proses AI Response
             with st.chat_message("assistant"):
                 placeholder = st.empty()
                 full_response = ""
@@ -414,7 +410,7 @@ def show_chatbot_page():
                     response_time = 0.0
                     ai_sources = {}
 
-                # 3. Simpan Log & Update History
+                # Simpan Log & Update History
                 save_chat_log(
                     st.session_state.get('username', 'Anonymous'),
                     user_question, full_response, response_time
